@@ -1,0 +1,75 @@
+---
+title: "MarkerPaperMetaAnalysis"
+author: "Amanda Charbonneau"
+date: "December 29, 2014"
+output: html_document
+---
+
+```{r Settings, echo=FALSE, message=FALSE}
+
+rm( list=ls())
+require(lme4) #modeling
+require(car) #ANOVA
+
+FlowData <- read.csv("CombinedDataSet.csv")
+
+```
+##Does days to flowering differ between native and non-native range populations of *R.r. raphanistrum*?
+*R.r. raphanistrum* is native to the area around the Mediterranean, and it has been suggested that it originated on the western side where Raphanus diversity is highest. We have *R.r. raphanistrum* populations from three main geographic areas: the western side of teh Mediterranean (all from France or Spain), the eastern side of the Mediterranean (all from Israel), and non-native. To test whether there is a difference in flowering time between native and non-natives, and also look for differences between native populations on either side of the Mediterranean Sea, we are modeling a subset of the data that only includes *R.r. raphanistrum* populations. 
+```{r SubsetRrr, echo=FALSE}
+#Subset out only the *R.r. raphanistrum* populations, and re-factor to make the western populations the base.
+
+RrrData <- droplevels(FlowData[FlowData$Taxonomy == "raphanistrum",])
+RrrData$Geography <- relevel(RrrData$Geography, "west")
+RrrData$Habitat <- relevel(RrrData$Habitat, "natural")
+RrrData$GermDate <- as.Date(RrrData$GermDate)
+
+```
+
+###Models for *R.r. raphanistrum*
+We want to model days to flowering as a function of Geography. As our datasets were done at different times and places, this is an idealized model which attempts to account for all known sources of variation caused by differences in experimental design.
+
+#####Model 1
+```{r Model1Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_1 <- lmer( PTF ~ Geography + Seedstock + GrowthEnvironment + DOYG + Habitat + GrowthEnvironment:Geography +  DaysVernNoNA +  (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrData  )
+
+```
+####Fixed Effects
+
+**DOYG** (Day of year germinated) OR **DOYP** (Day of year planted) accounts for variation in seasons, as experiments were started at different times of year and so experianced differing growth conditions like length of day and light intensity. We don't have germination date for all plants, but know that some have a gap of weeks-months between germ and flower dates.
+
+**DOYGP** takes the germination date if known, and the planting date if germination date is unknown
+
+**DaysVernNoNA** accounts for whether an individual was vernalized, and for how long
+
+**Seedstock** accounts for variation due to parental effects (mothers grown in greenhouse or outside)
+
+**GrowthEnvironment** accounts for variation due to the study plant being growth in the greenhouse or field
+
+The interaction term **GrowthEnvironment:Geography** allows populations from each region to have independent reactions to **GrowthEnvironment**
+
+####Random Effects
+
+The **Geography**|**Experiment** term accounts for apparent variance due to **Geography** that may be due to differnces between **Experiment**s
+
+The **Geography**:**Pop** term accounts for the differences among means (intercepts) for each level of **Geography**:**Pop**
+ 
+```{r, echo=FALSE}
+summary(Rrr_lmer_1)
+```
+
+
+
+```{r}
+Rrr_lm_1 <- lm(PTF ~ Geography + Seedstock + GrowthEnvironment + DOYG + Habitat + GrowthEnvironment:Geography +  DaysVernNoNA,  data=RrrData)
+
+```
+
+
+```{r}
+
+car::Anova(Rrr_lmer_1)
+car::vif(Rrr_lm_1)
+cov2cor(vcov(Rrr_lmer_1))
+```
+
