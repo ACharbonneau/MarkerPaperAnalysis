@@ -313,9 +313,9 @@ qst2003sub <- data.frame(rep("qst2003", length(qst_2003$Pop)),		#Experiment
                          rep(NA, length(qst_2003$Pop)),		#DTB
                          qst_2003$GermToFlwr,		#GTF
                          rep("2003", length(qst_2003$Pop)),		#Year
-                         rep(NA, length(qst_2003$Pop)),		#FlowDate
+                         (qst_2003$PlantingDate + (qst_2003$PlantToFlower * 60^2 * 24)),		#FlowDate
                          qst_2003$PlantingDate,    #PlantDate
-                         rep(NA, length(qst_2003$Pop)),		#GermDate
+                         (qst_2003$PlantingDate + (qst_2003$DaysToGerm * 60^2 * 24)),		#GermDate
                          qst_2003$X1stFlwrHgt_cm,		#HeightFFcm
                          ifelse(qst_2003$NumVernalz > 0, "Yes", "No"),		#Vernalized
                          qst_2003$DaysVernalized,		#DaysVern
@@ -329,9 +329,9 @@ qst2004sub <- data.frame(rep("qst2004", length(qst_2004$Pop)),		#Experiment
                          rep(NA, length(qst_2004$Pop)),		#DTB
                          qst_2004$germ2flwr,		#GTF
                          rep("2004", length(qst_2004$Pop)),		#Year
-                         rep(NA, length(qst_2004$Pop)),		#FlowDate
+                         (qst_2004$plantingDate + (qst_2004$plant2Flwr * 60^2 * 24)),		#FlowDate
                          qst_2004$plantingDate,    #PlantDate
-                         rep(NA, length(qst_2004$Pop)),		#GermDate
+                         (qst_2004$plantingDate + (qst_2004$germTime * 60^2 * 24)),		#GermDate
                          qst_2004$X1stFlwrHgt_cm,		#HeightFFcm
                          ifelse(qst_2004$NumVernal > 0, "Yes", "No"),		#Vernalized
                          qst_2004$DaysVernal,		#DaysVern
@@ -378,6 +378,7 @@ ParseData <- function( mydata ) {
   names( mydata ) <- columnnames
   mydata$Pop <- factor( mydata$Pop)
   mydata$Pop <- as.factor(as.character(droplevels(mydata$Pop)))
+  mydata$FlowDate <- format(mydata$FlowDate, format="%m/%d/%y")
   mydata$Flowered <- ifelse(mydata$PTF > 0, "Yes", "No")
   mydata$Flowered[is.na(mydata$Flowered)] <- "No"
   mydata$FlowWoVern <- ifelse(mydata$PTF > 0 & mydata$Vernalized == "No", "Yes",
