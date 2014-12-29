@@ -1,38 +1,10 @@
----
-title: "MarkerPaperMetaSetup"
-author: "Amanda Charbonneau"
-date: "December 9, 2014"
-output: html_document
----
 
-This script takes nine datasets from varying years and sources, and reformats them into one large csv file that can be used to analyze flowering time. Some data sets have extra datapoints for traits other than flowering time, which are not transfered into the final document.
-
-###Datasets:
-
-Cultivar GH 2013.csv
-
-2006Greenhouse.csv
-
-IsraelSpain Pops 2013 GH.csv
-
-LaleField2005.csv
-
-2012FieldData.csv
-
-2003QstParents.csv
-
-2004 QstOffspring.csv
-
-2013plantsSpring.csv
-
-Summer2010dataSummary.csv
-
-```{r Settings, echo=FALSE, message=FALSE}
+## ----Settings, echo=FALSE, message=FALSE---------------------------------
 rm( list=ls())
 require(plyr)
-```
 
-```{r ReadIN, echo=FALSE}
+
+## ----ReadIN, echo=FALSE--------------------------------------------------
 
 cult_2013 <- read.csv("Cultivar GH 2013.csv", na.strings=".")
 
@@ -51,9 +23,9 @@ qst_2004 <- read.csv("2004 QstOffspring.csv", na.strings=".")
 spring2013 <- read.csv("2013plantsSpring.csv", sep=",", na.strings="")
 
 sum2010 <- read.csv("Summer2010dataSummary.csv", na.strings=".")
-```
-####Fix dates for each dataset so they are all the same format, as in:
-```{r Dates1}
+
+
+## ----Dates1--------------------------------------------------------------
 # fix dates for Cultivar GH 2013.csv
 cult_2013$planted <- as.POSIXct( strptime(cult_2013$planted, format="%m/%d/%y"))
 cult_2013$Germ <- as.POSIXct( strptime(cult_2013$Germ, format="%m/%d/%y"))
@@ -63,9 +35,9 @@ cult_2013$FlowerDate <- as.POSIXct( strptime(cult_2013$FlowerDate, format="%m/%d
 cult_2013$FlowerPics <- as.POSIXct( strptime(cult_2013$FlowerPics, format="%m/%d/%y"))
 cult_2013$TissueColl <- as.POSIXct( strptime(cult_2013$TissueColl, format="%m/%d/%y"))
 
-```
 
-```{r Dates2, echo=FALSE}
+
+## ----Dates2, echo=FALSE--------------------------------------------------
 # fix dates for gh_2006
 gh_2006$flowerDate <- as.POSIXct( strptime(gh_2006$flowerDate, format="%m/%d/%y"))
 gh_2006$PlantingDate <- as.POSIXct( strptime(gh_2006$PlantingDate, format="%m/%d/%y"))
@@ -125,71 +97,9 @@ sum2010$X1stflwr <- as.POSIXct( strptime( sum2010$X1stflwr, format="%m/%d/%y"))
 sum2010$blossomPhoto <- as.POSIXct( strptime( sum2010$blossomPhoto, format="%m/%d/%y"))
 sum2010$tissueColl <- as.POSIXct( strptime( sum2010$tissueColl, format="%m/%d/%y"))
 sum2010$X2ndRosettePhoto <- as.POSIXct( strptime( sum2010$X2ndRosettePhoto, format="%m/%d/%y"))
-```
-####Get subsets of data from the various datasets into the same format, with columns as follows:
 
-**Experiment** is the name of the dataset the measurments came from
 
-**ID** is a unique identifier (at least within Experiment) for that individual
-
-**GrowthEnvironment** is where most of the plants obervations took place. Plants labeled "Field" may have been started in the greenhouse
-
-**Pop** is the four letter population abbreviation for that individual
-
-**PTF** is the number of whole days from planting (sowing seed) to the first open flower
-
-**DTB** is the number of whole days from germination to bolting
-
-**GTF** is the number of whole days from germination to the first open flower
-
-**Year** is the calendar year in which the seeds were sown
-
-**FlowDate** is the calendar date that the first flower opened
-
-**PlantDate** is the calendar date that the seed was first planted
-
-**GermData** is the calendar date that the seedling first emerged from the soil
-
-**HeightFFcm** is the height from the soil to the base of the stem of the first open flower
-
-**Vernalized** is whether that individual plant was put through a cold treatment
-
-**DaysVern** is the total number of days that the individual was kept below 12.8C
-
-**TimesVern** is the number of times that individual was cold treated
-
-**Flowered** is whether that plant ever flowered
-
-**FlowWoVern** is whether the plant flowered without vernalization
-
-**Seedstock** is whether this individuals parents were grown in the field, greenhouse or commercially
-
-**GermLocation** is whether this individual was started in the greenhouse, or in the field
-
-**Geography** indicates (regionally) where in the world the stock was collected. East/West refer to regions within the Mediterranean
-
-**Taxonomy** indicates species and subspecies for wild plants, and broad cultivar types for crops
-
-**SubSpecies** indicates species and subspecies designations
-
-**Species** indicates just species designations, ignoring subspecies divisions
-
-**Habitat** is cultivar type for crops, and a controlled vocabulary description of theregion that the seeds were orignally collected from for wild plants
-
-**SpecificOrigin** is the state/country/supply company each seed stock is from
-
-**RegionOrigin** is the state/country/type of cultivar for each seed stock
-
-**DOYP** is the calendar day (1-365) of year that the plant germinated, as experiments were started at different times of year and so experianced differing growth conditions like length of day and light intensity. We have planting day for all experiments, but know that in many cases there is up to a three month gap between planting and germination
-
-**DOYG** is the calendar day (1-365) of year that the plant germinated. We don't have germination date for all experiments
-
-**DOYGP** is the germination date if known, and the planting date if germination date is unknown
-
-**DaysVernNoNA** is whether an individual was vernalized (x = 0 = no), and for how many days (x > 0 = # days)
-
-As in:
-```{r Subsetting1}
+## ----Subsetting1---------------------------------------------------------
 columnnames <- c("Experiment", "ID", "GrowthEnvironment", "Pop", "PTF", "DTB", "GTF", "Year", "FlowDate", "PlantDate", "GermDate", "HeightFFcm", "Vernalized", "DaysVern", "TimesVern")
 
 # subset cult_2013
@@ -208,28 +118,9 @@ cult_2013sub <- data.frame(rep("Cult2013", length(cult_2013$Cultivar)),  	#Exper
                          rep("No", length(cult_2013$Cultivar)),		#Vernalized
                          rep(NA, length(cult_2013$Cultivar)),		#DaysVern
                          rep(NA, length(cult_2013$Cultivar)))		#TimesVern
-```
-#####Vernalization Data
-For greenhouse studies, the columns **Vernalized**, **DaysVern** and **TimesVern** were treatment variables and were taken directly from the data sheets. For the three field seasons, plants did experiance vernalization, but as winter rather than as a dedicated treatment. For these studies, I based their vernalization on the maximum daily temperature of the city they were grown in. Variables for these three studies were determined in the following way:
-
-**Vernalized** = Yes if plants survived the winter
-
-**Vernalized times** = 1 for all field plants that survived the winter
-
-**Vernalized length** = number of days between when max daily temp started staying below 12.8 to first day started staying above 12.8 based on data from http://www.almanac.com/weather/history/MI/Lansing/ (or Augusta)
 
 
->for i in `cat dates.txt`; do curl http://www.almanac.com/weather/history/MI/Lansing/${i} | grep "Maximum" >> Weatherdata/maxtemps.txt;done
-
-I opened each of these files in TextWrangler, then did the following grep-based Find & Replace:
-
-`find: .*/Lansing/(\d+-\d+-\d+)".*Maximum Temperature</h3><p><span class="value" > (\d+\.\d+).*`  
-
-`replace: \1,\2`
-
-For each resulting file, I imported it into R, and made a table that labeled each day that had a max temperature below 12.8 as "vern". Since these were all grown in Michigan, where daily temperatures in fall and spring fluxuate wildly, I chose the start and end dates as those where the temperature crossed the 12.8C threshold and then mostly stayed there. They're very subjective.
-
-```{r Vernalization, echo=FALSE}
+## ----Vernalization, echo=FALSE-------------------------------------------
 lale_05_06 <- read.csv("Weatherdata/maxtemps_05_06.txt", header=F)
 lale_05_06$year <- substr( as.character(lale_05_06$V1), 1, 4 )
 lale_05_06$vern <- ifelse(lale_05_06$V2 < 55, "vern", "")
@@ -245,9 +136,9 @@ winter_13_14$year <- substr( as.character(winter_13_14$V1), 1, 4 )
 winter_13_14$vern <- ifelse(winter_13_14$V2 < 55, "vern", "")
 
 
-```
 
-```{r Subsetting2, echo=FALSE}
+
+## ----Subsetting2, echo=FALSE---------------------------------------------
 gh2006sub <- data.frame(rep("gh2006", length(gh_2006$Pop)),  	#Experiment
                          paste(gh_2006$Pop, gh_2006$Individual,	sep=""),	#ID
                          rep("greenhouse", length(gh_2006$Pop)), 		#GrowthEnvironment
@@ -377,10 +268,9 @@ sum2010sub <- data.frame(rep("sum2010", length(sum2010$Pop)),		#Experiment
                          ifelse(sum2010$DaysVernal > 0, "Yes", "No"),		#Vernalized
                          sum2010$DaysVernal,		#DaysVern
                          sum2010$NumVernaliz)		#TimesVern
-```
-I ran each subsetted dataset through a custom function that changed all named variables to factors, created several of the "Yes"/"No" columns, rounded numbers in calculations, and assigned **Seedstock** and **GermLocation** data before combining all the datasets into a single dataframe.
 
-```{r Parsing, echo=FALSE}
+
+## ----Parsing, echo=FALSE-------------------------------------------------
 ParseData <- function( mydata ) {
   names( mydata ) <- columnnames
   mydata$Pop <- factor( mydata$Pop)
@@ -410,18 +300,17 @@ qst2003sub <- ParseData(qst2003sub)
 qst2004sub <- ParseData(qst2004sub)
 s2013sub <- ParseData(s2013sub)
 sum2010sub <- ParseData(sum2010sub)
-```
 
-```{r Combine}
+
+## ----Combine-------------------------------------------------------------
 CombinedDataSet <- data.frame(rbind(cult_2013sub, gh2006sub, IS_2013sub, lalesub, p2012sub, qst2003sub, qst2004sub, s2013sub, sum2010sub))
-```
 
-To create the **Subspecies**, **Species**, **Geography**, **Taxonomy**, **Habitat**, **SpecificOrigin** and **RegionOrigin** columns, I made a series of assignment lists based on population names, as in:
-```{r Assign1}
+
+## ----Assign1-------------------------------------------------------------
 SubSpeciesList <- c(ADOL="sativus", AROL="sativus", CBBG="sativus", COOL="sativus", DAJO="sativus", ESNK="sativus", MABG="sativus", MYJO="sativus", NELO="sativus", OIBG="sativus", RABG="sativus", RACA="sativus", SPEU="sativus", TOBG="sativus", WMBG="sativus", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="landra", SAES="maritimus", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="maritimus", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="sativus", FGBC="sativus", FRSI="sativus", LBBC="sativus", MBBC="sativus", NTJO="sativus", PABS="sativus", RABS="sativus", RBBC="sativus", SPNK="sativus", NZIL="confusus", TYIL="raphanistrum")
-```
 
-```{r Assign2, echo=FALSE}
+
+## ----Assign2, echo=FALSE-------------------------------------------------
 
 SpeciesList <- c(ADOL="sativus", AROL="sativus", CBBG="sativus", COOL="sativus", DAJO="sativus", ESNK="sativus", MABG="sativus", MYJO="sativus", NELO="sativus", OIBG="sativus", RABG="sativus", RACA="sativus", SPEU="sativus", TOBG="sativus", WMBG="sativus", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="raphanistrum", SAES="raphanistrum", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="raphanistrum", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="sativus", FGBC="sativus", FRSI="sativus", LBBC="sativus", MBBC="sativus", NTJO="sativus", PABS="sativus", RABS="sativus", RBBC="sativus", SPNK="sativus", NZIL="confusus", TYIL="raphanistrum")
 
@@ -434,9 +323,9 @@ HabitatList <- c(ADOL="cultivar", AROL="cultivar", CBBG="cultivar", COOL="cultiv
 SpecificOriginList <- c(ADOL="MSU", AROL="MSU", CBBG="BountifulGardens", COOL="MSU", DAJO="JohnScheepers", ESNK="NKLawn", MABG="BountifulGardens", MYJO="JohnScheepers", NELO="JohnScheepers", OIBG="BountifulGardens", RABG="BountifulGardens", RACA="California", SPEU="unknown", TOBG="BountifulGardens", WMBG="BountifulGardens", AFFR="France", BBCA="California", BINY="NewYork", GSCA="California", MAES="Spain", PBFR="France", SAES="Spain", DEES="Spain", GHIL="Israel", HCES="Spain", HMES="Spain", HZIL="Israel", IMES="Spain", ZYIL="Israel", AUFI="Finland", COAU="Australia", KAMI="Michigan", AL="Australia", CBES="Spain", GMIL="Israel", M3AU="Australia", N3="Australia", PG6="Australia", REIL="Israel", MAFI="Finland", NAAU="Australia", WEAU="Australia", CGBC="BakersCreek", FGBC="BakersCreek", FRSI="SeedsItaly", LBBC="BakersCreek", MBBC="BakersCreek", NTJO="JohnScheepers", PABS="Burpees", RABS="Burpees", RBBC="BakersCreek", SPNK="NKLawn", NZIL="Israel", TYIL="Israel")
 
 RegionOriginList <- c(ADOL="oleifera", AROL="oleifera", CBBG="european", COOL="oleifera", DAJO="european", ESNK="european", MABG="caudatus", MYJO="daikon", NELO="daikon", OIBG="oleifera", RABG="caudatus", RACA="caudatus", SPEU="european", TOBG="daikon", WMBG="daikon", AFFR="France", BBCA="California", BINY="NewYork", GSCA="California", MAES="Spain", PBFR="France", SAES="Spain", DEES="Spain", GHIL="Israel", HCES="Spain", HMES="Spain", HZIL="Israel", IMES="Spain", ZYIL="Israel", AUFI="Finland", COAU="Australia", KAMI="Michigan", AL="Australia", CBES="Spain", GMIL="Israel", M3AU="Australia", N3="Australia", PG6="Australia", REIL="Israel", MAFI="Finland", NAAU="Australia", WEAU="Australia", CGBC="daikon", FGBC="daikon", FRSI="european", LBBC="european", MBBC="european", NTJO="european", PABS="european", RABS="european", RBBC="european", SPNK="european", NZIL="Israel", TYIL="Israel")
-```
 
-```{r Assign3, echo=FALSE}
+
+## ----Assign3, echo=FALSE-------------------------------------------------
 #This section uses the assignment lists created above to make new columns based on CombinedDataSet$Pop
 
 CombinedDataSet$Geography <- as.factor(GeographyList[CombinedDataSet$Pop])
@@ -461,21 +350,19 @@ CombinedDataSet$DaysVernNoNA[is.na(CombinedDataSet$DaysVernNoNA)] <- 0
 
 
 
-```
 
-Write to CSV file:
-```{r write}
+
+## ----write---------------------------------------------------------------
 write.csv(CombinedDataSet, "CombinedDataSet.csv", quote=F, row.names=F)
-```
 
-###Error Checking
-```{r Attach, echo=FALSE}
+
+## ----Attach, echo=FALSE--------------------------------------------------
 str(CombinedDataSet)
 
 attach(CombinedDataSet)
-```
-Levels of each factor:
-```{r Levels}
+
+
+## ----Levels--------------------------------------------------------------
 length(levels(Pop))
 levels(Geography)
 levels(Taxonomy)
@@ -485,24 +372,20 @@ levels(Habitat)
 levels(SpecificOrigin)
 levels(RegionOrigin)
 
-```
 
-```{r Tables}
+
+## ----Tables--------------------------------------------------------------
 table(Pop)
 table(SubSpecies)
-```
 
-Boxplot of days from planting to flowering of each population
 
-```{r Plots1, echo=FALSE}
+## ----Plots1, echo=FALSE--------------------------------------------------
 par(las=2, cex.axis=.7)
 plot(Pop, PTF)
-```
 
-Barplot showing number of individuals per population
 
-```{r Plots2, echo=FALSE}
+## ----Plots2, echo=FALSE--------------------------------------------------
 par(las=2, cex.axis=.6)
 plot(Pop)
-```
+
 
