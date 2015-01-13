@@ -385,7 +385,6 @@ ParseData <- function( mydata ) {
   names( mydata ) <- columnnames
   mydata$Pop <- factor( mydata$Pop)
   mydata$Pop <- as.factor(as.character(droplevels(mydata$Pop)))
-  mydata$FlowDate <- format(mydata$FlowDate, format="%m/%d/%y")
   mydata$Flowered <- ifelse(mydata$PTF > 0, "Yes", "No")
   mydata$Flowered[is.na(mydata$Flowered)] <- "No"
   mydata$FlowWoVern <- ifelse(mydata$PTF > 0 & mydata$Vernalized == "No", "Yes",
@@ -437,7 +436,7 @@ RegionOriginList <- c(ADOL="oleifera", AROL="oleifera", CBBG="european", COOL="o
 ```
 
 ```{r Assign3, echo=FALSE}
-#This section uses the assignment lists created above to make new columns based on CombinedDataSet$Pop
+#This section uses the assignment lists created above to make new columns based on CombinedDataSet$Pop, and calculates the day of year (1-365) for planting and germination day
 
 CombinedDataSet$Geography <- as.factor(GeographyList[CombinedDataSet$Pop])
 CombinedDataSet$Taxonomy <- as.factor(TaxonomyList[CombinedDataSet$Pop])
@@ -458,6 +457,7 @@ CombinedDataSet$DOYG <- as.numeric(CombinedDataSet$DOYG)
 CombinedDataSet$DOYGP <- ifelse(is.na(CombinedDataSet$DOYG), CombinedDataSet$DOYP, CombinedDataSet$DOYG)
 CombinedDataSet$DaysVernNoNA <- CombinedDataSet$DaysVern
 CombinedDataSet$DaysVernNoNA[is.na(CombinedDataSet$DaysVernNoNA)] <- 0
+CombinedDataSet$FlowDate <- strftime(CombinedDataSet$FlowDate, format="%Y-%m-%d" )
 
 
 
@@ -490,6 +490,7 @@ levels(RegionOrigin)
 ```{r Tables}
 table(Pop)
 table(SubSpecies)
+table(Experiment)
 ```
 
 Boxplot of days from planting to flowering of each population

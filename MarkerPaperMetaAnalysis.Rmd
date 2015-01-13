@@ -2,74 +2,314 @@
 title: "MarkerPaperMetaAnalysis"
 author: "Amanda Charbonneau"
 date: "December 29, 2014"
-output: html_document
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 8
+  pdf_document: default
 ---
 
 ```{r Settings, echo=FALSE, message=FALSE}
 
 rm( list=ls())
+source("/Volumes/Storage/RadishData/Scripts/Misc_scripts/Functionarium.R")
 require(lme4) #modeling
 require(car) #ANOVA
+require(RColorBrewer)
+require(MuMIn) #summary stats for LMER models
+require(arm) #extractAIC
 
 FlowData <- read.csv("CombinedDataSet.csv")
+FlowData$FlowDate <- as.Date(FlowData$FlowDate)
+FlowData$GermDate <- as.Date(FlowData$GermDate)
+FlowData$PlantDate <- as.Date(FlowData$PlantDate)
+FlowData$Latency <- FlowData$GermDate - FlowData$PlantDate
+FlowData$DOYPS <- ifelse(FlowData$DOYP < 78, FlowData$DOYP + 287, FlowData$DOYP - 78 )
+FlowData$DOYGS <- ifelse(FlowData$DOYG < 78, FlowData$DOYG + 287, FlowData$DOYG - 78 )
+
+#write.csv(FlowData, "testdata.csv", quote=F, row.names=F)
 
 ```
-##Does days to flowering differ between native and non-native range populations of *R.r. raphanistrum*?
-*R.r. raphanistrum* is native to the area around the Mediterranean, and it has been suggested that it originated on the western side where Raphanus diversity is highest. We have *R.r. raphanistrum* populations from three main geographic areas: the western side of teh Mediterranean (all from France or Spain), the eastern side of the Mediterranean (all from Israel), and non-native. To test whether there is a difference in flowering time between native and non-natives, and also look for differences between native populations on either side of the Mediterranean Sea, we are modeling a subset of the data that only includes *R.r. raphanistrum* populations. 
+
+```{r Colors, echo=FALSE}
+
+col_pal1 = brewer.pal(12, "Set3")
+col_pal2 = brewer.pal(8, "Dark2")
+col_pal3 = brewer.pal(12, "Paired")
+col_pal = c(col_pal1, col_pal2, col_pal3)
+
+```
+
+
 ```{r SubsetRrr, echo=FALSE}
 #Subset out only the *R.r. raphanistrum* populations, and re-factor to make the western populations the base.
 
 RrrData <- droplevels(FlowData[FlowData$Taxonomy == "raphanistrum",])
 RrrData$Geography <- relevel(RrrData$Geography, "west")
 RrrData$Habitat <- relevel(RrrData$Habitat, "natural")
-RrrData$GermDate <- as.Date(RrrData$GermDate)
 
 ```
+
+###Does days to flowering differ between native and non-native range populations of *R.r. raphanistrum*?
+*R.r. raphanistrum* is native to the area around the Mediterranean, and it has been suggested that it originated on the western side where Raphanus diversity is highest. We have *R.r. raphanistrum* populations from three main geographic areas: the western side of the Mediterranean (all from France or Spain), the eastern side of the Mediterranean (all from Israel), and non-native. To test whether there is a difference in flowering time between native and non-natives, and also look for differences between native populations on either side of the Mediterranean Sea, we are modeling a subset of the data that only includes *R.r. raphanistrum* populations. 
 
 ###Models for *R.r. raphanistrum*
-We want to model days to flowering as a function of Geography. As our datasets were done at different times and places, this is an idealized model which attempts to account for all known sources of variation caused by differences in experimental design.
+We want to model days to flowering as a function of Geography. As our datasets were done at different times and places, this is an idealized model which attempts to account for all known sources of variation caused by differences in experimental design. To start, I'm trying five models that are all very similar to each other, and all have the same basic fixed and random effects:
 
-#####Model 1
-```{r Model1Rrr, echo=TRUE, eval=TRUE, message=FALSE}
-Rrr_lmer_1 <- lmer( PTF ~ Geography + Seedstock + GrowthEnvironment + DOYG + Habitat + GrowthEnvironment:Geography +  DaysVernNoNA +  (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrData  )
-
-```
 ####Fixed Effects
 
-**DOYG** (Day of year germinated) OR **DOYP** (Day of year planted) accounts for variation in seasons, as experiments were started at different times of year and so experianced differing growth conditions like length of day and light intensity. We don't have germination date for all plants, but know that some have a gap of weeks-months between germ and flower dates.
+**Geography** allows for each geographic group (east, west and non-native) to have its own intercept
 
-**DOYGP** takes the germination date if known, and the planting date if germination date is unknown
-
-**DaysVernNoNA** accounts for whether an individual was vernalized, and for how long
-
-**Seedstock** accounts for variation due to parental effects (mothers grown in greenhouse or outside)
+**Seedstock** captures the variation in flowering time due to parental growth environment. Since most populations only have a single parental growth environment, this should only see the effect of the qtl2004 populations, which were all propagated from qtl2003 and lale2005 populations which were propagated from qtl2004.
 
 **GrowthEnvironment** accounts for variation due to the study plant being growth in the greenhouse or field
 
-The interaction term **GrowthEnvironment:Geography** allows populations from each region to have independent reactions to **GrowthEnvironment**
+**DOYGS** (Day of year germinated, standardized) OR **DOYPS** (Day of year planted, standardized) accounts for variation in seasons, as experiments were started at different times of year and so experianced differing growth conditions like length of day and light intensity. We don't have germination date for all plants, but know that some have a gap of weeks-months between germ and flower dates. The 'standardization' is subtracting 78 from each value, then adding 365 to values less than zero, so that all the winter days are together.
+
+**Habitat** accounts for variation due to type of micro-habitat that each population was collected from and may be locally adapted to
+
+**DaysVernNoNA** accounts for whether an individual was vernalized, and for how long
+
+The interaction term **GrowthEnvironment:Geography** allows populations from each geographic region to have independent reactions to **GrowthEnvironment**
 
 ####Random Effects
 
-The **Geography**|**Experiment** term accounts for apparent variance due to **Geography** that may be due to differnces between **Experiment**s
+The **Geography**|**Experiment** term accounts for apparent variance among population means due to **Geography** that may be due to differences between **Experiment**s
 
-The **Geography**:**Pop** term accounts for the differences among means (intercepts) for each level of **Geography**:**Pop**
- 
+The **Geography**:**Pop** term finds the variance among population means within each geographic region
+
+Before running the models, here are graphs looking at the data I'm going to use to make sure everything looks like it's imported correctly and to see if any variables look bad (too many NA's, weird data points, etc.)
+
+#####Response variable
+We are modeling days to flowering as the response variable, but we have two different versions of this: **PTF** is planting to flower, which is the amount of time it took from putting the seed in soil until the subsequent plant first flowered. We also have **GTF**, which is germination to flowering. This is the amount of time from when the seedling first emerged from the soil until the plant flowered. Although these are very similar, only one, **PTF**, was recorded in all experiments, however for the experiments where both were recorded many individuals had very large lag times between planting and germination, with a range of `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[1]` to  `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[2]` for both the dataset as a whole, and just the R.r. raphanistrum subset. (The individual that took `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[2]` days was an MAES.)
+
+```{r AllResponsePlots, echo=FALSE, eval=FALSE}
+par(mfrow=c(2,2))
+hist(FlowData$PTF, probability=T, xlim=c(0,500), breaks=25, main="PTF for entire dataset")
+curve(dnorm(x, mean=mean2(FlowData$PTF), sd=sd2(FlowData$PTF)), col="red", add=T)
+
+plot(FlowData$PTF, col=col_pal3[FlowData$Experiment], main="PTF by experiment")
+text(x=c(rep(600, 4), rep(1700,5)), y=c(475, 425, 375, 325, 475, 425, 375, 325, 275), labels=levels(FlowData$Experiment), col=col_pal3)
+
+hist(FlowData$GTF, probability=T, xlim=c(0,500), breaks=25)
+curve(dnorm(x, mean=mean2(FlowData$GTF), sd=sd2(FlowData$GTF)), col="red", add=T)
+
+plot(FlowData$PTF, col=col_pal3[FlowData$Experiment], type="n", main="GTF by experiment")
+points(FlowData$GTF, col=col_pal3[FlowData$Experiment])
+text(x=c(rep(600, 4), rep(1700,5)), y=c(475, 425, 375, 325, 475, 425, 375, 325, 275), labels=levels(FlowData$Experiment), col=col_pal3)
+
+```
+
+
+```{r RrrResponseHist, echo=FALSE}
+par(mfrow=c(1,2))
+hist(RrrData$PTF, probability = TRUE, xlim=c(0,200), main="PTF histogram", breaks=50)
+curve(dnorm(x, mean=mean2(RrrData$PTF), sd=sd2(RrrData$PTF)), 
+  	add=T, col="red")
+
+plot(RrrData$PTF, col=col_pal3[RrrData$Experiment], main="PTF by experiment", ylab="PTF")
+text(x=c(rep(600, 4), rep(1200,4)), y=c(225, 200, 175, 150, 225, 200, 175, 150), labels=levels(RrrData$Experiment), col=col_pal3)
+
+hist(RrrData$GTF, probability = TRUE, xlim=c(0,200), main="GTF histogram", breaks=50)
+curve(dnorm(x, mean=mean2(RrrData$GTF), sd=sd2(RrrData$GTF)), 
+    add=T, col="red")
+
+plot(RrrData$PTF, col=RrrData$Experiment, type="n", main="GTF by experiment", ylab="GTF") #Plotting as same scale as PTF
+points(RrrData$GTF, col=col_pal3[RrrData$Experiment])
+text(x=c(rep(600, 4), rep(1200,4)), y=c(225, 200, 175, 150, 225, 200, 175, 150), labels=levels(RrrData$Experiment), col=col_pal3)
+```
+```
+Figure 1. PTF vs. GTF. 
+We can see that using GTF only slightly changes the density plot of flowering values, however it drops an entire experiment, gh2006, which appears as light green in the PTF graph. It's also obvious that many individuals within some experiments either didn't have GTF recorded, or had a very large difference in their PTF and GTF. Both IS2013 and qst2004 lose most of thier large values in the GTF graph.
+```
+#####Predictor variables
+These are plots of each predictor variable against the response. For each I have plotted against **PTF** on the left and against **GTF** on the right.
+
+```{r SeedstockandGeography, echo=FALSE}
+par(mfrow=c(1,2), las=1)
+plot(RrrData$PTF ~ RrrData$Seedstock, main= "Seedstock")
+plot(RrrData$GTF ~ RrrData$Seedstock, main= "Seedstock")
+plot(RrrData$PTF ~ RrrData$Geography, main="Geography", xlab="Geography", ylab="PTF")
+plot(RrrData$GTF ~ RrrData$Geography, main="Geography", xlab="Geography", ylab="GTF")
+```
+
+```{r Habitat, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+
+plot(RrrData$PTF ~ RrrData$Habitat, main="Habitat", xlab="Habitat", ylab="PTF")
+plot(RrrData$GTF ~ RrrData$Habitat, main="Habitat", xlab="Habitat", ylab="GTF")
+```
+
+
+```
+Figure 2. Variables basically unchanged by switching to GTF. 
+a. Flowering time distribution of plants whose parents were field collected, versus those whose parents have reduced maternal effects/"lab domestication". b. Geographic region where the population was originally collected in the wild. c. Type of habitat where the population was originally collected in the wild. Although a few data points drop out when plants without a known germination date drop out, the distribution within each factor is basically unchanged for all of these variables.
+```
+
+```{r DOYPS_DOYGS, echo=FALSE}
+par(mfrow=c(1,2))
+plot(RrrData$PTF ~ RrrData$DOYPS, col=col_pal3[RrrData$Experiment], main="DOYPS", xlab="DOYPS", ylab="PTF")
+plot(RrrData$GTF ~ RrrData$DOYGS, col=col_pal3[RrrData$Experiment], main="DOYGS", xlab="DOYGS", ylab="GTF")
+```
+
+
+
+```{r Vernalized, echo=FALSE}
+par(mfrow=c(1,2))
+plot(RrrData$PTF ~ RrrData$DaysVernNoNA, col=col_pal3[RrrData$Experiment], main="Days Vernalized", xlab="DaysVernNoNA", ylab="PTF")
+plot(RrrData$GTF ~ RrrData$DaysVernNoNA, col=col_pal3[RrrData$Experiment], main="Days Vernalized", xlab="DaysVernNoNA", ylab="GTF")
+
+```
+
+```
+Figure 3. 
+Variables signifigantly altered by using GTF.
+a. Day of year individual was planted/germinated. Since in most experiments, all individuals were planted at once, DOYP is effectivly a factor that is mostly colinear with experiment. In fact, the on expeiment with varied planting dates, is the gh2006, which has no germination data. DOYG has a much wider spread of dates for each population, so it will behave more like a continuous variable as intended and probably have a better estimate. b. Days Vernalized. This variable was already somewhat suspect because although we are treating it as continuous, in practise it is more like a factor. It happens that the plants that experianced 50 and 70 days of vernalization were also ones that didn't have germination recorded, so in the GTF model, this is effectively now vernalized: yes or no.
+```
+
+####Modeling
+In each model, I'm changing bits of the data that I know may cause issues, to see how much of a difference each term makes.
+
+#####Model 1: 
+######Response variable: Days from planting to flowering
+Because we know that **PTF** incorporates a lot of germination latency, this model will likely over-esimate time to flowering considerably. However, we don't have germination dates for one experiment, and I don't know how having a large number of NA's in the response would effect the model. So, this uses planting to flowering as the response, and DOYPS (day of year planted, standardized), which were recorded in all experiments.
+
+```{r Model1Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_1 <- lmer( PTF ~ Geography + Seedstock + GrowthEnvironment + DOYPS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography + (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrData  )
+
+```
+
+#####Model 2:
+######Response variable: Days from germination to flowering
+Here, I'm using germination to flowering as the response, which will be more accurate than planting to flowering, but have many more NA's. Since this model is based on germination. I also changed the day of year variable to be based on germination time rather than planting time. 
+```{r Model2Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_2 <- lmer( GTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography + (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrData  )
+
+```
+#####Model 3:
+######Data subset to exclude experiment with no germination data
+Here, I'm excluding the dataset that does not contain germination data, and using both GTF and DOYGS since neither will have a preponderance of NA's with gh2006 excluded.
+```{r Model3Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_3 <- lmer( GTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography + (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrData[RrrData$Experiment != "gh2006",]  )
+
+```
+#####Model 4:
+######Data subset to exclude vernalized plants
+This subset is to solve different problems in the data than the other three. Only one population (MAES) in the RrrData subset was ever vernalized, which could cause balance problems in the math of the model.  There is also some question as to whether the original experimenters recorded their flowering times including or excluding the vernalization period, which would make a huge difference in estimates. To solve these two issues, this model excludes all of the MAES that were vernalized, and will therefore reduce the estimates of flowering time for MAES. As the MAES estimate will be very conservative, if we can still see an effect, it suggests that there is a real difference between native and non-native populations. Since nothing is vernalized, this model also drops the **DaysVernNoNA** term.
+
+```{r Model4Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_4 <- lmer( GTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + GrowthEnvironment:Geography + (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrData[RrrData$DaysVernNoNA == 0, ]  )
+```
+
+#####Model 5:
+######Geographic predictor re-leveled to just native vs. non-native
+Ian also wanted to see if splitting out east and west made any difference, so this model is the same as model 2, but has only two levels for ***Geography**, which is now called ***Native***
+
+```{r Geo_to_Native, echo=FALSE}
+RrrData$Native <- RrrData$Geography
+levels(RrrData$Native) <- c("Native", "Native", "nonNative") 
+```
+
+```{r Model5Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_5 <- lmer( GTF ~ Native + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Native + (1 + Native|Experiment) + (1|Native:Pop), data=RrrData  )
+
+```
+
+
+```{r LMERsummary, echo=FALSE}
+LMERlist <- list( Rrr_lmer_1, Rrr_lmer_2, Rrr_lmer_3, Rrr_lmer_4, Rrr_lmer_5)
+
+SummaryLMER <- list(rep(NA, length(LMERlist)))
+
+```
+
+```{r LMER_ANOVA, echo=FALSE, results='hide'}
+for (i in 1:length(LMERlist)){
+SummaryLMER[[i]]  <- summary( LMERlist[[i]] )
+print(car::Anova(LMERlist[[i]]) )
+}
+```
+
+####Model Results
+***Fixed Effects*** (std.err) | M1: Response PTF| M2: Response GTF| M3: Exclude gh2006| M4: Exclude Vernalized| M5: Native/Non
+---------|--------|---------|---------|---------|----------
+GeographyWest (or Native) | `r round(SummaryLMER[[1]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["(Intercept)",2],2)`)
+GeographyEast | `r round(SummaryLMER[[1]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["Geographyeast",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["Geographyeast",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["Geographyeast",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["Geographyeast",2],2)`) | NA
+GeographyNonNative | `r round(SummaryLMER[[1]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["NativenonNative",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["NativenonNative",2],2)`)
+SeedstockGreenhouse | `r round(SummaryLMER[[1]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["SeedstockGreenhouse",2],2)`)
+GroEnvirGreenhouse | `r round(SummaryLMER[[1]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`)
+DOYGS or DOYPS | `r round(SummaryLMER[[1]]$coefficients["DOYPS",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["DOYPS",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["DOYGS",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["DOYGS",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["DOYGS",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["DOYGS",2],2)`)
+HabitatAgricultural | `r round(SummaryLMER[[1]]$coefficients["Habitatagricultural",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["Habitatagricultural",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["Habitatagricultural",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["Habitatagricultural",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["Habitatagricultural",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["Habitatagricultural",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["Habitatagricultural",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["Habitatagricultural",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["Habitatagricultural",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["Habitatagricultural",2],2)`)
+HabitatDisturbed | `r round(SummaryLMER[[1]]$coefficients["Habitatdisturbed",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["Habitatdisturbed",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["Habitatdisturbed",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["Habitatdisturbed",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["Habitatdisturbed",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["Habitatdisturbed",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["Habitatdisturbed",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["Habitatdisturbed",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["Habitatdisturbed",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["Habitatdisturbed",2],2)`)
+DaysVernNoNA | `r round(SummaryLMER[[1]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["DaysVernNoNA",2],2)`) | NA | `r round(SummaryLMER[[5]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["DaysVernNoNA",2],2)`)
+GeoEast:GroEnvirGreenhouse | `r round(SummaryLMER[[1]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | NA
+GeoNonNative:GroEnvirGreenhouse | `r round(SummaryLMER[[1]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["NativenonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["NativenonNative:GrowthEnvironmentgreenhouse",2],2)`)
+
+***Random Effects*** std.dev | M1: Response PTF| M2: Response GTF| M3: Exclude gh2006| M4: Exclude Vernalized | M5: Native/Non
+---------|--------|---------|---------|---------|---------
+Geography:Pop  | `r round(sqrt(VarCorr(LMERlist[[1]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[5]])$"Native:Pop"[1]) ,2)`
+Geographywest (Native) by Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[5]])$Experiment[1]) ,2)`
+Geographyeast by Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[5]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[5]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[5]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[5]) ,2)` | NA
+GeographynonNative by Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[5]])$Experiment[4]) ,2)`
+
+As you can see from the tables above, model one gives a much higher point estimate for base days to flowering, as well as for the ***Geography** and **GrowthEnvironment** variables. This is not surprising since the plants that had long latency between planting and germination tended to be from a only a few populations and experiments:    
 ```{r, echo=FALSE}
-summary(Rrr_lmer_1)
+plot(RrrData$Latency ~ RrrData$Experiment, col=col_pal[RrrData$Pop], pch=16, xlab='Experiment', ylab="Latency in Days")
 ```
 
+Models 2, 3, 4 and 5 all have very similar results to each other. Models 2 and 3, are, in fact, identical. This is not terribly surprising since gh2006 doesn't have ***GTF*** data. Model 2 used ***GTF*** as the response, and model 3 excluded the gh2006 dataset, so I expected them to correlate with each other. Similarly, I expected Model 5 to have analogous estimates. The estimates for the effect of east are small across all models, so removing the ability to assign effect to east shouldn't have much effect. However, I didn't expect any of them to be so similar to Model 4, which excluded all of the vernalized plants. Although the point estimates differ slightly, between 2/3, 4, and 5, all the differences are less than a day, which is biologically insignifigant, and below our detection threshold since we checked plants daily at most. So for inference, models 2, 3, 4 and 5 are basically indistinguishable from one another. You can also see that they all explain the data equally well:
 
 
-```{r}
-Rrr_lm_1 <- lm(PTF ~ Geography + Seedstock + GrowthEnvironment + DOYG + Habitat + GrowthEnvironment:Geography +  DaysVernNoNA,  data=RrrData)
+```{r LMER_goodness, echo=FALSE, fig.height=3}
+par(mfrow=c(1,3))
+for (i in c(3:5)){
+plot(fitted(LMERlist[[i]]) ~ LMERlist[[i]]@resp$y, main= c("Response plot",i ), xlab="Response", ylab="Fitted")
+abline(0, 1, col="red")
+text(min(LMERlist[[i]]@resp$y)+15, c(max(fitted(LMERlist[[i]])), max(fitted(LMERlist[[i]])-8)), labels=c("corr=", round(cor(fitted(LMERlist[[i]]), LMERlist[[i]]@resp$y), 2)))
+}
+
+for (i in c(3:5)){
+plot(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]]), main=c("Residual plot", i), ylab="Residuals", xlab="Fitted")
+lines(lowess(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]])), col="red")
+#lines(smooth.spline(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]])), col="green")
+#abline(lm(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]])), col="blue" )
+#text("topright", labels=r.squaredGLMM(LMERlist[[i]]))
+#print(importance(LMERlist[[i]]))
+}
+
+for (i in c(3:5)){
+qqnorm(resid(LMERlist[[i]]), main=c("Q-Q plot for residuals", i))
+qqline(resid(LMERlist[[i]]))
+}
+```
+
+However, if we look at the variance inflation factor, that is, how much each predictor is contributing to the overall variance, both the ***PTF*** model and models 2-4 with ***PTF*** have a lot of variance inflation at the predictors using ***Geography***. (All of them are exactly the same, this is the one for ***GTF***) 
+
+```{r lm_tests1, echo=FALSE, eval=TRUE}
+Rrr_lm_1 <- lm(PTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography,  data=RrrData, y=T)
+Rrr_lm_2 <- lm(GTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography,  data=RrrData, y=T)
+
+Rrr_lm_3 <- lm(GTF ~ Native + Seedstock + GrowthEnvironment + DOYGS + Habitat + GrowthEnvironment:Native +  DaysVernNoNA,  data=RrrData, y=T)
+
+car::vif(Rrr_lm_2)
+```
+However, changing from the three leveled ***Geography*** to the two leveled ***Native*** decreases the VIF by quite a bit:
+
+```{r lm_vif, echo=FALSE}
+car::vif(Rrr_lm_3)
+```
+
+Since they all have effectivly the same estimates, I'm not sure it matters whether we choose model 2/3/4 or model 5. 
+
+```{r Model6Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_6 <- lmer( GTF ~ Native + Seedstock + GrowthEnvironment + DOYGS + DaysVernNoNA + GrowthEnvironment:Native + (1 + Native|Experiment) + (1|Native:Pop), data=RrrData  )
 
 ```
 
+```{r Model7Rrr, echo=TRUE, eval=TRUE, message=FALSE}
+Rrr_lmer_7 <- lmer( GTF ~ Native + Seedstock + GrowthEnvironment + DOYGS + DaysVernNoNA + GrowthEnvironment:Native + (1 |Experiment) + (1|Native:Pop), data=RrrData  )
 
-```{r}
-
-car::Anova(Rrr_lmer_1)
-car::vif(Rrr_lm_1)
-cov2cor(vcov(Rrr_lmer_1))
 ```
 
+extractAIC(Rrr_lmer_6)
