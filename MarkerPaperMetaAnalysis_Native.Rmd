@@ -1,0 +1,610 @@
+---
+title: "MarkerPaperMetaAnalysis_Natives"
+author: "Amanda Charbonneau"
+date: "January 21, 2015"
+output: html_document
+---
+
+```{r Settings, echo=FALSE, message=FALSE}
+
+rm( list=ls())
+source("/Volumes/Storage/RadishData/Scripts/Misc_scripts/Functionarium.R")
+source("~/Dropbox/DworkinLabSharedMaterial/scripts/WRP_FUNCTIONS.R")
+require(lme4) #modeling
+require(car) #ANOVA
+require(RColorBrewer)
+require(MuMIn) #summary stats for LMER models
+require(arm) #extractAIC
+require( plyr ) #ddply
+
+FlowData <- read.csv("CombinedDataSet.csv")
+FlowData$FlowDate <- as.Date(FlowData$FlowDate)
+FlowData$GermDate <- as.Date(FlowData$GermDate)
+FlowData$PlantDate <- as.Date(FlowData$PlantDate)
+FlowData$Latency <- FlowData$GermDate - FlowData$PlantDate
+FlowData$DOYPS <- ifelse(FlowData$DOYP < 78, FlowData$DOYP + 287, FlowData$DOYP - 78 )
+FlowData$DOYGS <- ifelse(FlowData$DOYG < 78, FlowData$DOYG + 287, FlowData$DOYG - 78 )
+
+```
+
+```{r Colors, echo=FALSE}
+
+col_pal1 = brewer.pal(12, "Set3")
+col_pal2 = brewer.pal(8, "Dark2")
+col_pal3 = brewer.pal(12, "Paired")
+col_pal = c(col_pal1, col_pal2, col_pal3)
+
+GEGeo_colors <- c("confususfield"=col_pal3[7], "confususgreenhouse"=col_pal3[8], "eastfield"=col_pal3[3], "eastgreenhouse"=col_pal3[4],  "rostratusfield"=col_pal3[9], "rostratusgreenhouse"=col_pal3[10], "westfield"=col_pal3[1], "westgreenhouse"=col_pal3[2] )
+
+Geo_colors <- c("west"=col_pal3[1], "confusus"=col_pal3[7], "east"=col_pal3[3],"rostratus"=col_pal3[9])
+  
+```
+
+```{r SubsetNative, echo=FALSE}
+#Subset out only the *Native* populations, and re-factor to make the western populations the base.
+
+NatData <- droplevels(FlowData[FlowData$Geography != "nonNative" & FlowData$Species != "sativus",])
+
+NatData <- keepCols(NatData, c("ID", "GTF", "Geography", "Seedstock", "GrowthEnvironment", "DOYGS", "DaysVernNoNA", "Pop", "Experiment", "Habitat", "PTF", "DOYPS", "Native", "Latency", "Species", "SubSpecies", "Taxonomy", "SurviveGTF"))
+
+NatData$ID <- row.names(NatData)
+NatData$Geography <- relevel(NatData$Geography, "west")
+NatData$Habitat <- relevel(NatData$Habitat, "natural")
+NatData$SubSpecies <- relevel(NatData$SubSpecies, "raphanistrum")
+
+#write.csv(NatData, "testNat.csv", quote=F, row.names=F)
+```
+
+###Are there differences in DTF among native subspecies of *R. raphanistrum*?
+*R. raphanistrum* is native to the area around the Mediterranean, and it has been suggested that it originated on the western side where Raphanus diversity is highest. We have *R. raphanistrum* populations from three subspecies: *R.r. maritimus*, *R.r. landra* and *R.r. raphanistrum* as well as two other closely related and co-localizing *Raphanus* species: *R. confusus* and *R. rostratus*. We want to test both whether there is a difference in flowering time between native sub-species, and if there is, whether the *R. raphanistrum* sub-species are more similar to each other, or to other *Raphanus* species that are co-localized. 
+
+###Models for native *Raphanus*
+We want to model days to flowering as a function of SubSpecies. As our data sets were done at different times and places, we want to account for all known sources of variation caused by differences in experimental design. To start, all our models have the same basic fixed and random effects:
+
+####Fixed Effects
+
+**Geography** allows for each geographic group (east, west and non-native) to have its own intercept
+
+**Seedstock** captures the variation in flowering time due to parental growth environment. Since most populations only have a single parental growth environment, this should only see the effect of the qtl2004 populations, which were all propagated from qtl2003 and lale2005 populations which were propagated from qtl2004.
+
+**GrowthEnvironment** accounts for variation due to the study plant being growth in the greenhouse or field
+
+**DOYGS** (Day of year germinated, standardized) OR **DOYPS** (Day of year planted, standardized) accounts for variation in seasons, as experiments were started at different times of year and so experienced differing growth conditions like length of day and light intensity. We don't have germination date for all plants, but know that some have a gap of weeks-months between germ and flower dates. The 'standardization' is subtracting 78 from each value, then adding 365 to values less than zero, so that all the winter days are together.
+
+**Habitat** accounts for variation due to type of micro-habitat that each population was collected from and may be locally adapted to
+
+**DaysVernNoNA** accounts for whether an individual was vernalized, and for how long
+
+The interaction term **GrowthEnvironment:Geography** allows populations from each geographic region to have independent reactions to **GrowthEnvironment**
+
+####Random Effects
+
+The **Geography**|**Experiment** term accounts for apparent variance among population means due to **Geography** that may be due to differences between **Experiment**s
+
+The **Geography**:**Pop** term finds the variance among population means within each geographic region
+
+Before running the models, here are graphs looking at the data I'm going to use to make sure everything looks like it's imported correctly and to see if any variables look bad (too many NA's, weird data points, etc.)
+
+#####Response variable
+We are modeling days to flowering as the response variable, but we have two different versions of this: **PTF** is planting to flower, which is the amount of time it took from putting the seed in soil until the subsequent plant first flowered. We also have **GTF**, which is germination to flowering. This is the amount of time from when the seedling first emerged from the soil until the plant flowered. Although these are very similar, only one, **PTF**, was recorded in all experiments, however for the experiments where both were recorded many individuals had very large lag times between planting and germination, with a range of `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[1]` to  `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[2]` for both the data set as a whole, and just the native subset. (The individual that took `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[2]` days was an MAES.)
+
+
+```{r NatResponseHist, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+hist(NatData$PTF, probability = TRUE, xlim=c(0,550), main="PTF histogram", breaks=50)
+curve(dnorm(x, mean=mean2(NatData$PTF), sd=sd2(NatData$PTF)), 
+    add=T, col="red")
+
+plot(NatData$PTF, col=col_pal3[NatData$Experiment], main="PTF by experiment", ylab="PTF")
+text(x=c(rep(600, 4), rep(1100,4)), y=c(490, 465, 440, 415, 490, 465, 440, 415), labels=levels(NatData$Experiment), col=col_pal3)
+
+hist(NatData$GTF, probability = TRUE, xlim=c(0,550), main="GTF histogram", breaks=50)
+curve(dnorm(x, mean=mean2(NatData$GTF), sd=sd2(NatData$GTF)), 
+    add=T, col="red")
+
+plot(NatData$PTF, col=NatData$Experiment, type="n", main="GTF by experiment", ylab="GTF") #Plotting as same scale as PTF
+points(NatData$GTF, col=col_pal3[NatData$Experiment])
+text(x=c(rep(600, 4), rep(1100,4)), y=c(490, 465, 440, 415, 490, 465, 440, 415), labels=levels(NatData$Experiment), col=col_pal3)
+```
+```
+Figure 1. PTF vs. GTF. 
+We can see that using GTF only slightly changes the density plot of flowering values, however it drops an entire experiment, gh2006, which appears as light green in the PTF graph. It's also obvious that many of these experiments have a large gap between slow and fast flowering plants. Finally, many individuals within some experiments either didn't have GTF recorded, or had a very large difference in their PTF and GTF. For instance, IS2013 loses most of its large values in the GTF graph. 
+```
+
+#####Predictor variables
+These are plots of each predictor variable against the response. For each I have plotted against **PTF** on the left and against **GTF** on the right.
+
+```{r Seedstock, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2), las=1)
+plot(NatData$PTF ~ NatData$Seedstock, main= "Seedstock", xlab="Seedstock", ylab="PTF", ylim=c(0,500))
+plot(NatData$GTF ~ NatData$Seedstock, main= "Seedstock", xlab="Seedstock", ylab="GTF", ylim=c(0,500))
+```
+
+```{r Species, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2), las=2)
+plot(NatData$PTF ~ NatData$Species, main="Species", xlab="Species", ylab="PTF", ylim=c(0,500))
+plot(NatData$GTF ~ NatData$Species, main="Species", xlab="Species", ylab="GTF", ylim=c(0,500))
+```
+
+```{r SubSpecies, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2), las=2)
+plot(NatData$PTF ~ NatData$SubSpecies, main="SubSpecies", xlab="SubSpecies", ylab="PTF", ylim=c(0,500))
+plot(NatData$GTF ~ NatData$SubSpecies, main="SubSpecies", xlab="SubSpecies", ylab="GTF", ylim=c(0,500))
+```
+
+
+```{r Habitat, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+
+plot(NatData$PTF ~ NatData$Habitat, main="Habitat", xlab="Habitat", ylab="PTF", ylim=c(0,500))
+plot(NatData$GTF ~ NatData$Habitat, main="Habitat", xlab="Habitat", ylab="GTF", ylim=c(0,500))
+```
+
+
+```
+Figure 2. Variables basically unchanged by switching to GTF. 
+a. Flowering time distribution of plants whose parents were field collected, versus those whose parents have reduced maternal effects/"lab domestication". b. Geographic region where the population was originally collected in the wild. c. Type of habitat where the population was originally collected in the wild. Although a few data points drop out when plants without a known germination date drop out, the distribution within each factor is basically unchanged for all of these variables.
+```
+
+
+
+```{r RemoveNA, echo=FALSE}
+NatDataGTF <- NatData[!is.na(NatData$GTF),]
+NatDataGTF <- NatDataGTF[!is.na(NatDataGTF$DOYGS),]
+
+NatDataSurvive <- NatData[!is.na(NatData$SurviveGTF),]
+NatDataSurvive <- NatDataSurvive[!is.na(NatDataSurvive$DOYGS),]
+
+NoAFFRGTF <- NatDataGTF[NatDataGTF$Pop != "AFFR",]
+JustRrsGTF <- NatDataGTF[NatDataGTF$Pop != "NZIL" & NatDataGTF$Pop != "GMIL",]
+CanonNatGTF <- NatDataGTF[NatDataGTF$Pop != "NZIL" & NatDataGTF$Pop != "GMIL" & NatDataGTF$Pop != "AFFR",]
+
+```
+
+
+####Modeling
+These models all originally included **DOYGS** as a predictor, but it had zero effect to three decimal places, so I dropped it to increase the DoF available to fit other parameters
+
+#####Model 1
+This is the model that is roughly equivalent to the model we used to look at the differences between the ***R.r. raphanistrum*** plants, just using **SubSpecies** instead of **Geography**
+```{r Model1Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_1 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataGTF  )
+```
+#####Model 2
+Model 1, but dropping AFFR since I could probably justify dropping it from the natives data set
+```{r Model2Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_2 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=NoAFFRGTF  )
+```
+
+#####Model 3
+Model 1, but dropping GMIL and NZIL as I could justify dropping them since they're different species
+```{r Model3Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_3 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=JustRrsGTF )
+```
+
+#####Model 4
+Model 1, but dropping AFFR, GMIL and NZIL
+```{r Model4Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_4 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=CanonNatGTF )
+```
+
+#####Model 5
+Model 1, but dropping **GrowthEnvironment:SubSpecies**
+```{r Model5Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_5 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataGTF  )
+```
+
+#####Model 6
+This is the model that is roughly equivalent to the model we used to look at the differences between the ***R.r. raphanistrum*** plants, just using **SubSpecies** instead of **Geography**, and using the new **SurviveGTF** response
+```{r Model6Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_6 <- lmer( SurviveGTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataSurvive  )
+```
+
+#####Model 7
+Model 1, but dropping **GrowthEnvironment:SubSpecies** and using the new **SurviveGTF** response
+```{r Model7Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_7 <- lmer( SurviveGTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataSurvive  )
+```
+
+#####Model 8
+This is the model that is roughly equivalent to the model we used to look at the differences between the ***R.r. raphanistrum*** plants, just using **SubSpecies** instead of **Geography**, and using the new **SurviveGTF** response. Dropped **GrowthEnvironment** as in Rrr_lmer_14
+```{r Model8Nat, echo=TRUE, eval=T, message=T}
+Nat_lmer_8 <- lmer( SurviveGTF ~ SubSpecies + Seedstock + DaysVernNoNA + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataSurvive  )
+```
+####Notes
+```
+In model 1, I'm using the ideal model, which has the same basic effects parameters as the ***R.r. raphanistrum*** model. Unfortunately, since there are many more levels for several of the fixed effects, the model doesn't have enough degrees of freedom to fit all the terms. However, LMER is automatically dropping fixed effects and fitting the model, and the fixed effects it does keep from **GrowthEnvironment:SubSpecies** are quite large (maritimus grown in the greenhouse take `r round(summary(Nat_lmer_1)$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",1], 2)` days more than the overall mean). This suggests that the plants have some plasticity due to growth environment, which is quite relevant to the question of whether the weeds and natives are truly divergent. Since this is biologically important I'd like to model it as a fixed effect, however that isn't easy. Progressively dropping populations (and hence, levels that need to be estimated), in models 2-4 does reduced the number of fixed effects that need to be dropped for the model to fit, but doesn't result in the requisite DoF. 
+
+```
+
+
+```{r LMER_ANOVA, echo=FALSE, results='hide'}
+
+LMERlist <- list( Nat_lmer_1, Nat_lmer_2, Nat_lmer_3, Nat_lmer_4, Nat_lmer_5, Nat_lmer_6, Nat_lmer_7, Nat_lmer_8)
+
+SummaryLMER <- list(rep(NA, length(LMERlist)))
+
+for (i in 1:length(LMERlist)){
+SummaryLMER[[i]]  <- summary( LMERlist[[i]] )
+print(car::Anova(LMERlist[[i]]) )
+}
+```
+
+
+####Model Results 
+#####(these models didn't fit 'correctly', LMER fit fewer terms than I asked for)
+**Fixed Effects** (std.err) | M1: AllNat| M2: NoAFFR| M3: JustRrs| M4: CanonNat | M5: DropGE:SS | M6: AllNatSurvive | M7:DropGE:SS Survive | M8:Drop GE, Survive
+---------|--------|---------|---------|---------|---------|---------|---------|---------
+SS. raph            | `r round(SummaryLMER[[1]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[8]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["(Intercept)",2],2)`) 
+SS. NZIL            | `r round(SummaryLMER[[1]]$coefficients["SubSpeciesconfusus",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpeciesconfusus",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpeciesconfusus",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpeciesconfusus",2],2)`) | NA | NA | `r round(SummaryLMER[[5]]$coefficients["SubSpeciesconfusus",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["SubSpeciesconfusus",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["SubSpeciesconfusus",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpeciesconfusus",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["SubSpeciesconfusus",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["SubSpeciesconfusus",2],2)`) | `r round(SummaryLMER[[8]]$coefficients["SubSpeciesconfusus",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["SubSpeciesconfusus",2],2)`)
+SS. landra          | `r round(SummaryLMER[[1]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["SubSpecieslandra",2],2)`) | `r round(SummaryLMER[[8]]$coefficients["SubSpecieslandra",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["SubSpecieslandra",2],2)`) 
+SS. mari            | `r round(SummaryLMER[[1]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpeciesmaritimus",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpeciesmaritimus",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["SubSpeciesmaritimus",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["SubSpeciesmaritimus",2],2)`)  | `r round(SummaryLMER[[5]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["SubSpeciesmaritimus",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpeciesmaritimus",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["SubSpeciesmaritimus",2],2)`)  | `r round(SummaryLMER[[8]]$coefficients["SubSpeciesmaritimus",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["SubSpeciesmaritimus",2],2)`)  
+SS. GMIL            | `r round(SummaryLMER[[1]]$coefficients["SubSpeciesrostratus",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpeciesrostratus",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpeciesrostratus",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpeciesrostratus",2],2)`) | NA | NA | `r round(SummaryLMER[[5]]$coefficients["SubSpeciesrostratus",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["SubSpeciesrostratus",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["SubSpeciesrostratus",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpeciesrostratus",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["SubSpeciesrostratus",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["SubSpeciesrostratus",2],2)`) | `r round(SummaryLMER[[8]]$coefficients["SubSpeciesrostratus",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["SubSpeciesrostratus",2],2)`)
+GroEnvirGreenhouse  | `r round(SummaryLMER[[1]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | NA
+SeedstockGreenhouse | `r round(SummaryLMER[[1]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[8]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["SeedstockGreenhouse",2],2)`)
+DaysVernNoNA        | `r round(SummaryLMER[[1]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[5]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[5]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[6]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[7]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[7]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[8]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[8]]$coefficients["DaysVernNoNA",2],2)`) 
+SS. NZIL GH         | `r round(SummaryLMER[[1]]$coefficients["SubSpeciesconfusus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpeciesconfusus:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpeciesconfusus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpeciesconfusus:GrowthEnvironmentgreenhouse",2],2)`) | NA | NA | NA |  `r round(SummaryLMER[[6]]$coefficients["SubSpeciesconfusus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpeciesconfusus:GrowthEnvironmentgreenhouse",2],2)`) |  NA | NA
+SS. mari GH         | `r round(SummaryLMER[[1]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",2],2)`) | NA | `r round(SummaryLMER[[6]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpeciesmaritimus:GrowthEnvironmentgreenhouse",2],2)`) | NA | NA
+SS. GMIL GH         | `r round(SummaryLMER[[1]]$coefficients["SubSpeciesrostratus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SubSpeciesrostratus:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SubSpeciesrostratus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SubSpeciesrostratus:GrowthEnvironmentgreenhouse",2],2)`) | NA | NA | NA | `r round(SummaryLMER[[6]]$coefficients["SubSpeciesrostratus:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[6]]$coefficients["SubSpeciesrostratus:GrowthEnvironmentgreenhouse",2],2)`) | NA | NA
+
+**Random Effects** std.dev | M1: AllNat| M2: NoAFFR| M3: JustRrs| M4: CanonNat | M5: DropGE:SS | M6: AllNatSurvive | M7:DropGE:SS Survive | M8:Drop GE, Survive
+---------|--------|---------|---------|---------|---------|---------|---------|---------
+SubSpecies:Pop  | `r round(sqrt(VarCorr(LMERlist[[1]])$"SubSpecies:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$"SubSpecies:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$"SubSpecies:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$"SubSpecies:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[5]])$"SubSpecies:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[6]])$"SubSpecies:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[7]])$"SubSpecies:Pop"[1]) ,2)` |  `r round(sqrt(VarCorr(LMERlist[[8]])$"SubSpecies:Pop"[1]) ,2)` 
+Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[5]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[6]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[7]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[8]])$Experiment[1]) ,2)` 
+
+
+```{r ModelBootstrapFunctions, echo=FALSE}
+iter <- 1000
+
+grabmeans <- function( mermod ){
+  return( mermod@resp$mu )
+}
+
+grabresiduals <- function( mermod ){
+  return(c(summary(mermod)$coefficients["(Intercept)",1], summary(mermod)$coefficients["SeedstockGreenhouse",1], mermod@resp$wtres))
+}
+
+twostageboot <- function(firstmodel, secondmodelbits, data){
+  firstboot <- bootMer( firstmodel, FUN= grabresiduals, nsim=1, type="parametric")
+  NoNusValues<- firstboot$t[3:length(firstboot$t)] + #residuals
+      firstboot$t[1] + #intercept
+      (firstboot$t[2] * #estimate for seedstock effect
+      table(firstboot$data$Seedstock)[[2]] / length(firstboot$data$Seedstock)) #weight days by number of plants with parents from each seedstock
+  secondmodel <- as.formula(paste( "NoNusValues", secondmodelbits ))
+  secondmodel <- lmer(secondmodel, data=data)
+  secondboot <- bootMer( secondmodel, FUN=grabmeans, nsim=1, type="parametric")
+  secondboot$t 
+}
+
+
+```
+
+
+```{r SetupModels, echo=FALSE}
+#Nat_lmer_1 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataGTF  )
+#Nat_lmer_5 <- lmer( GTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataGTF  )
+#Nat_lmer_6 <- lmer( SurviveGTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + GrowthEnvironment:SubSpecies + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataSurvive  )
+#Nat_lmer_7 <- lmer( SurviveGTF ~ SubSpecies + Seedstock + GrowthEnvironment + DaysVernNoNA + (1|Experiment) + (1|SubSpecies:Pop), data=NatDataSurvive  )
+
+M1results <- matrix(nrow=iter, ncol=length(NatDataGTF$Pop))
+M5results <- matrix(nrow=iter, ncol=length(NatDataGTF$Pop))
+M6results <- matrix(nrow=iter, ncol=length(NatDataSurvive$Pop))
+M7results <- matrix(nrow=iter, ncol=length(NatDataSurvive$Pop))
+M8results <- matrix(nrow=iter, ncol=length(NatDataSurvive$Pop))
+M9results <- matrix(nrow=iter, ncol=length(NatDataSurvive$Pop))
+
+NoNus15 <- lmer(GTF  ~ Seedstock + DaysVernNoNA + (1|Experiment), data=NatDataGTF)
+NoNus67 <- lmer(SurviveGTF ~ Seedstock + DaysVernNoNA + (1|Experiment), data=NatDataSurvive)
+NoNus9  <- lmer(SurviveGTF ~ Seedstock + (1|Experiment), data=NatDataSurvive)
+
+
+ResidModelM1 <- "SubSpecies + GrowthEnvironment + GrowthEnvironment:SubSpecies + (1|SubSpecies:Pop)" #NoNusValues15
+ResidModelM5 <- "~ SubSpecies + GrowthEnvironment + (1|SubSpecies:Pop)" #NoNusValues15
+
+ResidModelM6 <- "~ SubSpecies + GrowthEnvironment + GrowthEnvironment:SubSpecies + (1|SubSpecies:Pop)" #NoNusValues67
+ResidModelM7 <- "~ SubSpecies + GrowthEnvironment + (1|SubSpecies:Pop)" #NoNusValues67
+
+ResidModelM8 <- "~ SubSpecies + (1|SubSpecies:Pop)" #NoNusValues67 
+ResidModelM9  <- "~ SubSpecies+ DaysVernNoNA + (1|SubSpecies:Pop)" #NoNusValues9
+
+```
+
+
+```{r bootstrapModels, echo=FALSE}
+for( i in 1:iter){
+  #GTF models
+  M1results[i, ]     <- twostageboot( NoNus15, ResidModelM1, NatDataGTF)
+  M5results[i, ]     <- twostageboot( NoNus15, ResidModelM5, NatDataGTF)
+  #Survive GTF models
+  M6results[i, ]     <- twostageboot( NoNus67, ResidModelM6, NatDataSurvive)
+  M7results[i, ]     <- twostageboot( NoNus67, ResidModelM7, NatDataSurvive)
+  M8results[i, ]     <- twostageboot( NoNus67, ResidModelM8, NatDataSurvive)
+  M9results[i, ]     <- twostageboot( NoNus9, ResidModelM9, NatDataSurvive)
+  
+```
+
+
+```{r, Fix, echo=FALSE}
+#{r, OneModelCIs, echo=FALSE}
+
+singlemodelboot <- function(firstmodel, secondmodelbits, data){
+  #firstboot <- bootMer( firstmodel, FUN= grabresiduals, nsim=1, type="parametric")
+  #NoNusValues<- firstboot$t[3:length(firstboot$t)] + #residuals
+  #    firstboot$t[1] + #intercept
+  #    (firstboot$t[2] * #estimate for seedstock effect
+  #    table(firstboot$data$Seedstock)[[2]] / length(firstboot$data$Seedstock)) #weight days by number of plants with parents from each seedstock
+  NoNusValues<- firstmodel@resp$wtres + #residuals
+      summary(firstmodel)$coefficients["(Intercept)",1] + #intercept
+      (summary(firstmodel)$coefficients["SeedstockGreenhouse",1] * #estimate for seedstock effect
+      length(firstmodel@frame$Seedstock[firstmodel@frame$Seedstock == "Greenhouse"]) / length(firstmodel@frame$Seedstock)) #weight days by number of plants with parents from each seedstock
+  secondmodel <- as.formula(paste( "NoNusValues", secondmodelbits ))
+  secondmodel <- lmer(secondmodel, data=data)
+  secondboot <- bootMer( secondmodel, FUN=grabmeans, nsim=iter, type="parametric")
+  list(secondmodel@resp$mu, secondboot$t)
+}
+
+twostagemodelmeans <- function(firstmodel, secondmodelbits, data){
+  NoNusValues<- firstmodel@resp$wtres + #residuals
+      summary(firstmodel)$coefficients["(Intercept)",1] + #intercept
+      (summary(firstmodel)$coefficients["SeedstockGreenhouse",1] * #estimate for seedstock effect
+      length(firstmodel@frame$Seedstock[firstmodel@frame$Seedstock == "Greenhouse"]) / length(firstmodel@frame$Seedstock)) #weight days by number of plants with parents from each seedstock
+  secondmodel <- as.formula(paste( "NoNusValues", secondmodelbits ))
+  secondmodel <- lmer(secondmodel, data=data)
+  secondmodel@resp$mu
+}
+#################################################################
+GTFboot <- singlemodelboot(NoNusGTF, ResidModelGTF, RrrDataGTF)
+GTFvernboot <- singlemodelboot( NoNusGTFVern, ResidModelGTFVern, RrrDataGTF)
+Surviveboot <- singlemodelboot( NoNusSurvive, ResidModelSurvive, RrrDataSurvive)
+SurviveVernboot <- singlemodelboot( NoNusSurviveVern, ResidModelSurviveVern, RrrDataSurvive)
+M14boot <- singlemodelboot( NoNus14, ResidModel14, RrrDataSurvive)
+M14Vernboot <- singlemodelboot( NoNus14Vern, ResidModel14Vern, RrrDataSurvive)
+
+```
+
+```{r FixNames, echo=FALSE}
+#{r GetModelMeansCIs, echo=FALSE}
+
+NatModelsGTF <- data.frame(NatDataGTF$ID, NatDataGTF$Pop, NatDataGTF$GrowthEnvironment, NatDataGTF$Geography,
+                           data.frame(Nat_lmer_5@resp$mu), #M1 single mean
+                           data.frame(twostagemodelmeans(NoNus15, ResidModelM1, NatDataGTF)), #M1 2stage mean
+                           t(apply( M1results$t, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))),
+                           apply( M1results$t, MARGIN=2, FUN=sd), 
+                           data.frame(twostagemodelmeans(NoNus15, ResidModelM5, NatDataGTF)), #M5 2stage mean
+                           t(apply( M5results$t, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))),
+                           apply( M5results$t, MARGIN=2, FUN=sd))
+NatModelsSurvive <- data.frame(NatDataSurvive$ID, NatDataSurvive$Pop, NatDataSurvive$GrowthEnvironment, NatDataSurvive$Geography,   
+                           data.frame(Nat_lmer_7@resp$mu), #M7 single mean
+                           data.frame(twostagemodelmeans(NoNus67, ResidModelM6, NatDataSurvive)), #M6 2stage mean 
+                           t(apply( M6results$t, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))),
+                           apply( M6results$t, MARGIN=2, FUN=sd),
+                           data.frame(twostagemodelmeans(NoNus67, ResidModelM7, NatDataSurvive)), #M7 2stage mean  
+                           t(apply( M7results$t, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))),
+                           apply( M7results$t, MARGIN=2, FUN=sd))
+
+NoGEmodel <-  data.frame(NatDataSurvive$ID, NatDataSurvive$Pop, NatDataSurvive$Geography,
+                         data.frame(Nat_lmer_8@resp$mu), #M8 single mean
+                         data.frame(twostagemodelmeans(NoNus67, ResidModelM8, NatDataSurvive)), #M8 2stage mean 
+                         t(apply( M8results$t, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))),
+                         apply( M8results$t, MARGIN=2, FUN=sd),
+                         data.frame(twostagemodelmeans(NoNus9, ResidModelM9, NatDataSurvive)), #M9 2stage mean 
+                         t(apply( M9results$t, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))),
+                         apply( M9results$t, MARGIN=2, FUN=sd))
+
+                      
+names(NatModelsGTF) <- c("ID", "Pop", "GE", "Geo", "M5singleMean",
+                         "MeanM1", "paraQlowM1", "paraQhighM1", "paraSDM1", "MeanM5", "paraQlowM5", "paraQhighM5", "paraSDM5") 
+names(NatModelsSurvive) <- c("ID", "Pop", "GE", "Geo", "M7singleMean",                        
+                         "MeanM6", "paraQlowM6", "paraQhighM6", "paraSDM6", "MeanM7", "paraQlowM7", "paraQhighM7", "paraSDM7")
+names(NoGEmodel) <- c("ID", "Pop", "Geo", "M8singleMean",
+                      "MeanM8", "paraQlowM8", "paraQhighM8", "paraSDM8")
+
+GTFNtable <- as.data.frame(table(NatDataGTF$Pop, NatDataGTF$GrowthEnvironment))
+names(GTFNtable) <- c("Pop", "GE", "GTFN")
+SGTFNtable <- as.data.frame(table(NatDataSurvive$Pop, NatDataSurvive$GrowthEnvironment))
+names(SGTFNtable) <- c("Pop", "GE", "SGTFN")
+PopSGTFNtable <- as.data.frame(table(NatDataSurvive$Pop))
+names(PopSGTFNtable)  <- c("Pop", "PopSN")
+
+StrAvg <- ddply( NatData, .(Pop, GrowthEnvironment), summarize, StrmeanGTF=mean2( GTF ), sdGTF= (1.96 * sd2( GTF )), StrmeanSGTF=mean2( SurviveGTF ), sdSGTF=(1.96 * sd2( SurviveGTF )) )
+
+names(StrAvg) <- c("Pop", "GE", "StrmeanGTF", "CIsdGTF", "StrmeanSGTF", "CIsdSGTF")
+
+GTF_agg <- aggregate(NatModelsGTF[,5:13], by=list( "Pop"=NatModelsGTF$Pop, "Geo"=NatModelsGTF$Geo, "GE"=NatModelsGTF$GE ), FUN=mean)
+Sur_agg <- aggregate(NatModelsSurvive[,5:13], by=list( "Pop"=NatModelsSurvive$Pop, "Geo"=NatModelsSurvive$Geo, "GE"=NatModelsSurvive$GE ), FUN=mean)
+Nat_agg <- merge(GTF_agg, Sur_agg)
+Nat_agg <- merge(GTFNtable, Nat_agg)
+Nat_agg <- merge(SGTFNtable, Nat_agg)
+Nat_agg <- merge(StrAvg, Nat_agg)
+Nat_agg$GEGeo <- as.factor(paste(Nat_agg$Geo, Nat_agg$GE, sep=""))
+Nat_agg$GEGeoColor <-  as.factor(GEGeo_colors[Nat_agg$GEGeo])
+
+Nat_agg <- Nat_agg[order( Nat_agg$Geo, partial=Nat_agg$Pop ), ]
+
+Nat_M8 <- aggregate(NoGEmodel[,4:8], by=list( "Pop"=NoGEmodel$Pop, "Geo"=NoGEmodel$Geo), FUN=mean)
+Nat_M8 <- merge(Nat_M8, PopSGTFNtable)
+Nat_M8$GeoColor <- as.factor(Geo_colors[Nat_M8$Geo])
+Nat_M8 <- Nat_M8[order( Nat_M8$Geo, partial=Nat_M8$Pop), ]
+
+
+```
+
+
+```{r GetModelpredictorSE, echo=FALSE, results='hide'}
+
+RM_profileM1 <- profile(ResidModelM1)
+confint(ResidModelM1)
+
+```
+
+
+I can present mean flowering time per population in two different ways. Either with a mean for each population averaged across greenhouse and field experiments, or with a different mean for plants grown in field experiments than in greenhouse experiments. We've agreed that it will be most useful to have means for field and greenhouse populations. 
+
+**Pop** | **GE** | **Geo** | **GTFN** | **SGTFN** | **StrMeanGTF** | **StrMeanSur** | **M1_Mean** | **M5_Mean** | **M6_Mean** | **M7_Mean** 
+--------|--------|---------|----------|-----------|----------------|----------------|-------------|-------------|-------------|-------------
+`r Nat_agg$Pop[01]` | `r Nat_agg$GE[01]` | `r Nat_agg$Geo[01]` | `r Nat_agg$GTFN[01]` | `r Nat_agg$SGTFN[01]` | `r round(Nat_agg$StrmeanGTF[01], 1)` | `r round(Nat_agg$StrmeanSGTF[01], 1)` |`r round(Nat_agg$MeanM1[01], 1)` |`r round(Nat_agg$MeanM5[01], 1)` | `r round(Nat_agg$MeanM6[01], 1)` | `r round(Nat_agg$MeanM7[01], 1)` 
+`r Nat_agg$Pop[02]` | `r Nat_agg$GE[02]` | `r Nat_agg$Geo[02]` | `r Nat_agg$GTFN[02]` | `r Nat_agg$SGTFN[02]` | `r round(Nat_agg$StrmeanGTF[02], 1)` | `r round(Nat_agg$StrmeanSGTF[02], 1)` |`r round(Nat_agg$MeanM1[02], 1)` |`r round(Nat_agg$MeanM5[02], 1)` | `r round(Nat_agg$MeanM6[02], 1)` | `r round(Nat_agg$MeanM7[02], 1)` 
+`r Nat_agg$Pop[03]` | `r Nat_agg$GE[03]` | `r Nat_agg$Geo[03]` | `r Nat_agg$GTFN[03]` | `r Nat_agg$SGTFN[03]` | `r round(Nat_agg$StrmeanGTF[03], 1)` | `r round(Nat_agg$StrmeanSGTF[03], 1)` |`r round(Nat_agg$MeanM1[03], 1)` |`r round(Nat_agg$MeanM5[03], 1)` | `r round(Nat_agg$MeanM6[03], 1)` | `r round(Nat_agg$MeanM7[03], 1)` 
+`r Nat_agg$Pop[04]` | `r Nat_agg$GE[04]` | `r Nat_agg$Geo[04]` | `r Nat_agg$GTFN[04]` | `r Nat_agg$SGTFN[04]` | `r round(Nat_agg$StrmeanGTF[04], 1)` | `r round(Nat_agg$StrmeanSGTF[04], 1)` |`r round(Nat_agg$MeanM1[04], 1)` |`r round(Nat_agg$MeanM5[04], 1)` | `r round(Nat_agg$MeanM6[04], 1)` | `r round(Nat_agg$MeanM7[04], 1)` 
+`r Nat_agg$Pop[05]` | `r Nat_agg$GE[05]` | `r Nat_agg$Geo[05]` | `r Nat_agg$GTFN[05]` | `r Nat_agg$SGTFN[05]` | `r round(Nat_agg$StrmeanGTF[05], 1)` | `r round(Nat_agg$StrmeanSGTF[05], 1)` |`r round(Nat_agg$MeanM1[05], 1)` |`r round(Nat_agg$MeanM5[05], 1)` | `r round(Nat_agg$MeanM6[05], 1)` | `r round(Nat_agg$MeanM7[05], 1)` 
+`r Nat_agg$Pop[06]` | `r Nat_agg$GE[06]` | `r Nat_agg$Geo[06]` | `r Nat_agg$GTFN[06]` | `r Nat_agg$SGTFN[06]` | `r round(Nat_agg$StrmeanGTF[06], 1)` | `r round(Nat_agg$StrmeanSGTF[06], 1)` |`r round(Nat_agg$MeanM1[06], 1)` |`r round(Nat_agg$MeanM5[06], 1)` | `r round(Nat_agg$MeanM6[06], 1)` | `r round(Nat_agg$MeanM7[06], 1)` 
+`r Nat_agg$Pop[07]` | `r Nat_agg$GE[07]` | `r Nat_agg$Geo[07]` | `r Nat_agg$GTFN[07]` | `r Nat_agg$SGTFN[07]` | `r round(Nat_agg$StrmeanGTF[07], 1)` | `r round(Nat_agg$StrmeanSGTF[07], 1)` |`r round(Nat_agg$MeanM1[07], 1)` |`r round(Nat_agg$MeanM5[07], 1)` | `r round(Nat_agg$MeanM6[07], 1)` | `r round(Nat_agg$MeanM7[07], 1)` 
+`r Nat_agg$Pop[08]` | `r Nat_agg$GE[08]` | `r Nat_agg$Geo[08]` | `r Nat_agg$GTFN[08]` | `r Nat_agg$SGTFN[08]` | `r round(Nat_agg$StrmeanGTF[08], 1)` | `r round(Nat_agg$StrmeanSGTF[08], 1)` |`r round(Nat_agg$MeanM1[08], 1)` |`r round(Nat_agg$MeanM5[08], 1)` | `r round(Nat_agg$MeanM6[08], 1)` | `r round(Nat_agg$MeanM7[08], 1)` 
+`r Nat_agg$Pop[09]` | `r Nat_agg$GE[09]` | `r Nat_agg$Geo[09]` | `r Nat_agg$GTFN[09]` | `r Nat_agg$SGTFN[09]` | `r round(Nat_agg$StrmeanGTF[09], 1)` | `r round(Nat_agg$StrmeanSGTF[09], 1)` |`r round(Nat_agg$MeanM1[09], 1)` |`r round(Nat_agg$MeanM5[09], 1)` | `r round(Nat_agg$MeanM6[09], 1)` | `r round(Nat_agg$MeanM7[09], 1)` 
+`r Nat_agg$Pop[10]` | `r Nat_agg$GE[10]` | `r Nat_agg$Geo[10]` | `r Nat_agg$GTFN[10]` | `r Nat_agg$SGTFN[10]` | `r round(Nat_agg$StrmeanGTF[10], 1)` | `r round(Nat_agg$StrmeanSGTF[10], 1)` |`r round(Nat_agg$MeanM1[10], 1)` |`r round(Nat_agg$MeanM5[10], 1)` | `r round(Nat_agg$MeanM6[10], 1)` | `r round(Nat_agg$MeanM7[10], 1)` 
+`r Nat_agg$Pop[11]` | `r Nat_agg$GE[11]` | `r Nat_agg$Geo[11]` | `r Nat_agg$GTFN[11]` | `r Nat_agg$SGTFN[11]` | `r round(Nat_agg$StrmeanGTF[11], 1)` | `r round(Nat_agg$StrmeanSGTF[11], 1)` |`r round(Nat_agg$MeanM1[11], 1)` |`r round(Nat_agg$MeanM5[11], 1)` | `r round(Nat_agg$MeanM6[11], 1)` | `r round(Nat_agg$MeanM7[11], 1)` 
+`r Nat_agg$Pop[12]` | `r Nat_agg$GE[12]` | `r Nat_agg$Geo[12]` | `r Nat_agg$GTFN[12]` | `r Nat_agg$SGTFN[12]` | `r round(Nat_agg$StrmeanGTF[12], 1)` | `r round(Nat_agg$StrmeanSGTF[12], 1)` |`r round(Nat_agg$MeanM1[12], 1)` |`r round(Nat_agg$MeanM5[12], 1)` | `r round(Nat_agg$MeanM6[12], 1)` | `r round(Nat_agg$MeanM7[12], 1)` 
+`r Nat_agg$Pop[13]` | `r Nat_agg$GE[13]` | `r Nat_agg$Geo[13]` | `r Nat_agg$GTFN[13]` | `r Nat_agg$SGTFN[13]` | `r round(Nat_agg$StrmeanGTF[13], 1)` | `r round(Nat_agg$StrmeanSGTF[13], 1)` |`r round(Nat_agg$MeanM1[13], 1)` |`r round(Nat_agg$MeanM5[13], 1)` | `r round(Nat_agg$MeanM6[13], 1)` | `r round(Nat_agg$MeanM7[13], 1)` 
+`r Nat_agg$Pop[14]` | `r Nat_agg$GE[14]` | `r Nat_agg$Geo[14]` | `r Nat_agg$GTFN[14]` | `r Nat_agg$SGTFN[14]` | `r round(Nat_agg$StrmeanGTF[14], 1)` | `r round(Nat_agg$StrmeanSGTF[14], 1)` |`r round(Nat_agg$MeanM1[14], 1)` |`r round(Nat_agg$MeanM5[14], 1)` | `r round(Nat_agg$MeanM6[14], 1)` | `r round(Nat_agg$MeanM7[14], 1)` 
+`r Nat_agg$Pop[15]` | `r Nat_agg$GE[15]` | `r Nat_agg$Geo[15]` | `r Nat_agg$GTFN[15]` | `r Nat_agg$SGTFN[15]` | `r round(Nat_agg$StrmeanGTF[15], 1)` | `r round(Nat_agg$StrmeanSGTF[15], 1)` |`r round(Nat_agg$MeanM1[15], 1)` |`r round(Nat_agg$MeanM5[15], 1)` | `r round(Nat_agg$MeanM6[15], 1)` | `r round(Nat_agg$MeanM7[15], 1)` 
+`r Nat_agg$Pop[16]` | `r Nat_agg$GE[16]` | `r Nat_agg$Geo[16]` | `r Nat_agg$GTFN[16]` | `r Nat_agg$SGTFN[16]` | `r round(Nat_agg$StrmeanGTF[16], 1)` | `r round(Nat_agg$StrmeanSGTF[16], 1)` |`r round(Nat_agg$MeanM1[16], 1)` |`r round(Nat_agg$MeanM5[16], 1)` | `r round(Nat_agg$MeanM6[16], 1)` | `r round(Nat_agg$MeanM7[16], 1)` 
+`r Nat_agg$Pop[17]` | `r Nat_agg$GE[17]` | `r Nat_agg$Geo[17]` | `r Nat_agg$GTFN[17]` | `r Nat_agg$SGTFN[17]` | `r round(Nat_agg$StrmeanGTF[17], 1)` | `r round(Nat_agg$StrmeanSGTF[17], 1)` |`r round(Nat_agg$MeanM1[17], 1)` |`r round(Nat_agg$MeanM5[17], 1)` | `r round(Nat_agg$MeanM6[17], 1)` | `r round(Nat_agg$MeanM7[17], 1)` 
+`r Nat_agg$Pop[18]` | `r Nat_agg$GE[18]` | `r Nat_agg$Geo[18]` | `r Nat_agg$GTFN[18]` | `r Nat_agg$SGTFN[18]` | `r round(Nat_agg$StrmeanGTF[18], 1)` | `r round(Nat_agg$StrmeanSGTF[18], 1)` |`r round(Nat_agg$MeanM1[18], 1)` |`r round(Nat_agg$MeanM5[18], 1)` | `r round(Nat_agg$MeanM6[18], 1)` | `r round(Nat_agg$MeanM7[18], 1)` 
+`r Nat_agg$Pop[19]` | `r Nat_agg$GE[19]` | `r Nat_agg$Geo[19]` | `r Nat_agg$GTFN[19]` | `r Nat_agg$SGTFN[19]` | `r round(Nat_agg$StrmeanGTF[19], 1)` | `r round(Nat_agg$StrmeanSGTF[19], 1)` |`r round(Nat_agg$MeanM1[19], 1)` |`r round(Nat_agg$MeanM5[19], 1)` | `r round(Nat_agg$MeanM6[19], 1)` | `r round(Nat_agg$MeanM7[19], 1)` 
+`r Nat_agg$Pop[20]` | `r Nat_agg$GE[20]` | `r Nat_agg$Geo[20]` | `r Nat_agg$GTFN[20]` | `r Nat_agg$SGTFN[20]` | `r round(Nat_agg$StrmeanGTF[20], 1)` | `r round(Nat_agg$StrmeanSGTF[20], 1)` |`r round(Nat_agg$MeanM1[20], 1)` |`r round(Nat_agg$MeanM5[20], 1)` | `r round(Nat_agg$MeanM6[20], 1)` | `r round(Nat_agg$MeanM7[20], 1)` 
+`r Nat_agg$Pop[21]` | `r Nat_agg$GE[21]` | `r Nat_agg$Geo[21]` | `r Nat_agg$GTFN[21]` | `r Nat_agg$SGTFN[21]` | `r round(Nat_agg$StrmeanGTF[21], 1)` | `r round(Nat_agg$StrmeanSGTF[21], 1)` |`r round(Nat_agg$MeanM1[21], 1)` |`r round(Nat_agg$MeanM5[21], 1)` | `r round(Nat_agg$MeanM6[21], 1)` | `r round(Nat_agg$MeanM7[21], 1)` 
+`r Nat_agg$Pop[22]` | `r Nat_agg$GE[22]` | `r Nat_agg$Geo[22]` | `r Nat_agg$GTFN[22]` | `r Nat_agg$SGTFN[22]` | `r round(Nat_agg$StrmeanGTF[22], 1)` | `r round(Nat_agg$StrmeanSGTF[22], 1)` |`r round(Nat_agg$MeanM1[22], 1)` |`r round(Nat_agg$MeanM5[22], 1)` | `r round(Nat_agg$MeanM6[22], 1)` | `r round(Nat_agg$MeanM7[22], 1)` 
+`r Nat_agg$Pop[23]` | `r Nat_agg$GE[23]` | `r Nat_agg$Geo[23]` | `r Nat_agg$GTFN[23]` | `r Nat_agg$SGTFN[23]` | `r round(Nat_agg$StrmeanGTF[23], 1)` | `r round(Nat_agg$StrmeanSGTF[23], 1)` |`r round(Nat_agg$MeanM1[23], 1)` |`r round(Nat_agg$MeanM5[23], 1)` | `r round(Nat_agg$MeanM6[23], 1)` | `r round(Nat_agg$MeanM7[23], 1)` 
+
+
+```{r plotModels1_5, echo=FALSE, fig.height=8, warning=FALSE}
+par(mfrow=c(2,1), las=2)
+barplot(height=Nat_agg$MeanM1, names.arg=Nat_agg$Pop, cex.names=.75, col=as.character(Nat_agg$GEGeoColor), space=c(rep(0, length(Nat_agg$Geo[Nat_agg$Geo=="west"])), 1, rep(0,(length(Nat_agg$Geo[Nat_agg$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_agg$Geo[Nat_agg$Geo=="east"])-1)), 1) , ylim=c(-6, 150),  main="Model 1\nOriginal response variable and GE:Subspecies interaction" ) 
+
+#Plot N below bars
+
+text(y=-3, x=c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"])), labels=Nat_agg$GTFN[Nat_agg$Geo=="west"], cex=.6)
+text(y=-3, x=c(14.5, 15.5), labels=Nat_agg$GTFN[Nat_agg$Geo=="confusus"], cex=.6)
+text(y=-3, x=seq(17.5, 22.5, by=1), labels=Nat_agg$GTFN[Nat_agg$Geo=="east"], cex=.6)
+text(y=-3, x=c(24.5, 25.5), labels=Nat_agg$GTFN[Nat_agg$Geo=="rostratus"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=140, x=15, "Red error bars are CIs of parametric BS of second model only", cex=.6)
+text(y=120, x=15, "Blue error bars are 1.96*SD of parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQlowM1, c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQhighM1,length=.05, angle=90, code=3, col=2 )
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM1 - (1.96 *Nat_agg$paraSDM1)), c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM1 + (1.96 *Nat_agg$paraSDM1)),length=.05, angle=90, code=3, col=4 )
+
+legend("topright", legend=c( "West, Field", "West, Greenhouse", "confusus, Field", "confusus, Greenhouse", "East, Field", "East, Greenhouse", "rostratus, Field", "rostratus, Greenhouse"),text.col=GEGeo_colors[c(7,8,1,2,3,4,5,6)], bty="n", cex=.5 ) 
+
+barplot(height=Nat_agg$MeanM5, names.arg=Nat_agg$Pop, cex.names=.75, col=as.character(Nat_agg$GEGeoColor), space=c(rep(0, length(Nat_agg$Geo[Nat_agg$Geo=="west"])), 1, rep(0,(length(Nat_agg$Geo[Nat_agg$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_agg$Geo[Nat_agg$Geo=="east"])-1)), 1) , ylim=c(-6, 150),  main="Model 5\nOriginal response variable w/o GE:Subspecies interaction" ) 
+
+#Plot N below bars
+
+text(y=-3, x=c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"])), labels=Nat_agg$GTFN[Nat_agg$Geo=="west"], cex=.6)
+text(y=-3, x=c(14.5, 15.5), labels=Nat_agg$GTFN[Nat_agg$Geo=="confusus"], cex=.6)
+text(y=-3, x=seq(17.5, 22.5, by=1), labels=Nat_agg$GTFN[Nat_agg$Geo=="east"], cex=.6)
+text(y=-3, x=c(24.5, 25.5), labels=Nat_agg$GTFN[Nat_agg$Geo=="rostratus"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=140, x=15, "Red error bars are CIs of parametric BS of second model only", cex=.6)
+text(y=120, x=15, "Blue error bars are 1.96*SD of parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQlowM5, c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQhighM5,length=.05, angle=90, code=3, col=2 )
+
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM5 - (1.96 *Nat_agg$paraSDM5)), c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM5 + (1.96 *Nat_agg$paraSDM5)),length=.05, angle=90, code=3, col=4 )
+
+legend("topright", legend=c( "West, Field", "West, Greenhouse", "confusus, Field", "confusus, Greenhouse", "East, Field", "East, Greenhouse", "rostratus, Field", "rostratus, Greenhouse"),text.col=GEGeo_colors[c(7,8,1,2,3,4,5,6)], bty="n", cex=.5 ) 
+
+```
+
+```{r plotModels6_7_8, echo=FALSE, fig.height=4, warning=FALSE}
+par(mfrow=c(1,1), las=2)
+barplot(height=Nat_agg$MeanM6, names.arg=Nat_agg$Pop, cex.names=.75, col=as.character(Nat_agg$GEGeoColor), space=c(rep(0, length(Nat_agg$Geo[Nat_agg$Geo=="west"])), 1, rep(0,(length(Nat_agg$Geo[Nat_agg$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_agg$Geo[Nat_agg$Geo=="east"])-1)), 1) , ylim=c(-10, 200),  main="Model 6\nSurvive response variable and GE:Subspecies interaction" ) 
+
+#Plot N below bars
+
+text(y=-5, x=c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"])), labels=Nat_agg$SGTFN[Nat_agg$Geo=="west"], cex=.6)
+text(y=-5, x=c(14.5, 15.5), labels=Nat_agg$SGTFN[Nat_agg$Geo=="confusus"], cex=.6)
+text(y=-5, x=seq(17.5, 22.5, by=1), labels=Nat_agg$SGTFN[Nat_agg$Geo=="east"], cex=.6)
+text(y=-5, x=c(24.5, 25.5), labels=Nat_agg$SGTFN[Nat_agg$Geo=="rostratus"], cex=.6)
+text(y=-5, x=-.7, labels="N=", cex=.8)
+text(y=190, x=15, "Red error bars are CIs of parametric BS of second model only", cex=.6)
+text(y=170, x=15, "Blue error bars are 1.96*SD of parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQlowM6, c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQhighM6,length=.05, angle=90, code=3, col=2 )
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM6 - (1.96 *Nat_agg$paraSDM6)), c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM6 + (1.96 *Nat_agg$paraSDM6)),length=.05, angle=90, code=3, col=4 )
+
+legend("topright", legend=c( "West, Field", "West, Greenhouse", "confusus, Field", "confusus, Greenhouse", "East, Field", "East, Greenhouse", "rostratus, Field", "rostratus, Greenhouse"),text.col=GEGeo_colors[c(7,8,1,2,3,4,5,6)], bty="n", cex=.5 ) 
+
+barplot(height=Nat_agg$MeanM7, names.arg=Nat_agg$Pop, cex.names=.75, col=as.character(Nat_agg$GEGeoColor), space=c(rep(0, length(Nat_agg$Geo[Nat_agg$Geo=="west"])), 1, rep(0,(length(Nat_agg$Geo[Nat_agg$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_agg$Geo[Nat_agg$Geo=="east"])-1)), 1) , ylim=c(-10, 200),  main="Model 7\nSurvive response variable w/o GE:Subspecies interaction" ) 
+
+#Plot N below bars
+
+text(y=-5, x=c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"])), labels=Nat_agg$SGTFN[Nat_agg$Geo=="west"], cex=.6)
+text(y=-5, x=c(14.5, 15.5), labels=Nat_agg$SGTFN[Nat_agg$Geo=="confusus"], cex=.6)
+text(y=-5, x=seq(17.5, 22.5, by=1), labels=Nat_agg$SGTFN[Nat_agg$Geo=="east"], cex=.6)
+text(y=-5, x=c(24.5, 25.5), labels=Nat_agg$SGTFN[Nat_agg$Geo=="rostratus"], cex=.6)
+text(y=-5, x=-.7, labels="N=", cex=.8)
+text(y=190, x=15, "Red error bars are CIs of parametric BS of second model only", cex=.6)
+text(y=170, x=15, "Blue error bars are 1.96*SD of parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQlowM7, c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), Nat_agg$paraQhighM7,length=.05, angle=90, code=3, col=2 )
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM7 - (1.96 *Nat_agg$paraSDM7)), c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$MeanM7 + (1.96 *Nat_agg$paraSDM7)),length=.05, angle=90, code=3, col=4 )
+
+legend("topright", legend=c( "West, Field", "West, Greenhouse", "confusus, Field", "confusus, Greenhouse", "East, Field", "East, Greenhouse", "rostratus, Field", "rostratus, Greenhouse"),text.col=GEGeo_colors[c(7,8,1,2,3,4,5,6)], bty="n", cex=.5 ) 
+
+###Model 8
+
+barplot(height=Nat_M8$MeanM8, names.arg=Nat_M8$Pop, cex.names=.75, col=as.character(Nat_M8$GeoColor), space=c(rep(0, length(Nat_M8$Geo[Nat_M8$Geo=="west"])), 1, rep(0,(length(Nat_M8$Geo[Nat_M8$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_M8$Geo[Nat_M8$Geo=="east"])-1)), 1) , ylim=c(-10, 200),  main="Model 8\nSurvive response variable w/o GE" ) 
+
+#Plot N below bars
+
+text(y=-5, x=c(.5:length(Nat_M8$Geo[Nat_M8$Geo=="west"])), labels=Nat_M8$PopSN[Nat_M8$Geo=="west"], cex=.6)
+text(y=-5, x=10.5, labels=Nat_M8$PopSN[Nat_M8$Geo=="confusus"], cex=.6)
+text(y=-5, x=seq(12.5, 16.5, by=1), labels=Nat_M8$PopSN[Nat_M8$Geo=="east"], cex=.6)
+text(y=-5, x=18.5, labels=Nat_M8$PopSN[Nat_M8$Geo=="rostratus"], cex=.6)
+text(y=-5, x=-.7, labels="N=", cex=.8)
+text(y=190, x=15, "Red error bars are CIs of parametric BS of second model only", cex=.6)
+text(y=170, x=15, "Blue error bars are 1.96*SD of parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_M8$Geo[Nat_M8$Geo=="west"]), 10.5, seq(12.5, 16.5, by=1), 18.5), Nat_M8$paraQlowM8, c(.5:length(Nat_M8$Geo[Nat_M8$Geo=="west"]), 10.5, seq(12.5, 16.5, by=1), 18.5), Nat_M8$paraQhighM8,length=.05, angle=90, code=3, col=2 )
+
+arrows(c(.5:length(Nat_M8$Geo[Nat_M8$Geo=="west"]), 10.5, seq(12.5, 16.5, by=1), 18.5), (Nat_M8$MeanM8 - (1.96 *Nat_M8$paraSDM8)), c(.5:length(Nat_M8$Geo[Nat_M8$Geo=="west"]), 10.5, seq(12.5, 16.5, by=1), 18.5), (Nat_M8$MeanM8 + (1.96 *Nat_M8$paraSDM8)),length=.05, angle=90, code=3, col=4 )
+
+legend("topright", legend=c( "West", "confusus", "East", "rostratus"),text.col=Geo_colors[c(1, 2, 3, 4)], bty="n", cex=.5 ) 
+```
+
+```{r PlotStrAvgs, echo=FALSE, fig.height=8, warning=FALSE}
+par(mfrow=c(2,1), las=2)
+barplot(height=Nat_agg$StrmeanGTF, names.arg=Nat_agg$Pop, cex.names=.75, col=as.character(Nat_agg$GEGeoColor), space=c(rep(0, length(Nat_agg$Geo[Nat_agg$Geo=="west"])), 1, rep(0,(length(Nat_agg$Geo[Nat_agg$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_agg$Geo[Nat_agg$Geo=="east"])-1)), 1) , ylim=c(-15, max(Nat_agg$StrmeanGTF) + 20),  main="Unweighted Pop Mean\nOriginal response variable" ) 
+
+#Plot N below bars
+
+text(y=-8, x=c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"])), labels=Nat_agg$GTFN[Nat_agg$Geo=="west"], cex=.6)
+text(y=-8, x=c(14.5, 15.5), labels=Nat_agg$GTFN[Nat_agg$Geo=="confusus"], cex=.6)
+text(y=-8, x=seq(17.5, 22.5, by=1), labels=Nat_agg$GTFN[Nat_agg$Geo=="east"], cex=.6)
+text(y=-8, x=c(24.5, 25.5), labels=Nat_agg$GTFN[Nat_agg$Geo=="rostratus"], cex=.6)
+text(y=-8, x=-.7, labels="N=", cex=.8)
+text(y=200, x=23, "error bars are 1.96 * SD", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$StrmeanGTF - Nat_agg$CIsdGTF), c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$StrmeanGTF + Nat_agg$CIsdGTF),length=.05, angle=90, code=3 )
+
+legend("topright", legend=c( "West, Field", "West, Greenhouse", "confusus, Field", "confusus, Greenhouse", "East, Field", "East, Greenhouse", "rostratus, Field", "rostratus, Greenhouse"),text.col=GEGeo_colors[c(7,8,1,2,3,4,5,6)], bty="n", cex=.5 ) 
+
+barplot(height=Nat_agg$StrmeanSGTF, names.arg=Nat_agg$Pop, cex.names=.75, col=as.character(Nat_agg$GEGeoColor), space=c(rep(0, length(Nat_agg$Geo[Nat_agg$Geo=="west"])), 1, rep(0,(length(Nat_agg$Geo[Nat_agg$Geo=="confusus"])-1)), 1, rep(0, (length(Nat_agg$Geo[Nat_agg$Geo=="east"])-1)), 1) , ylim=c(-15, max(Nat_agg$StrmeanSGTF) + 20),  main="Unweighted Pop Mean\nSurvivor response variable" ) 
+
+#Plot N below bars
+
+text(y=-8, x=c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"])), labels=Nat_agg$SGTFN[Nat_agg$Geo=="west"], cex=.6)
+text(y=-8, x=c(14.5, 15.5), labels=Nat_agg$SGTFN[Nat_agg$Geo=="confusus"], cex=.6)
+text(y=-8, x=seq(17.5, 22.5, by=1), labels=Nat_agg$SGTFN[Nat_agg$Geo=="east"], cex=.6)
+text(y=-8, x=c(24.5, 25.5), labels=Nat_agg$SGTFN[Nat_agg$Geo=="rostratus"], cex=.6)
+text(y=-8, x=-.7, labels="N=", cex=.8)
+text(y=200, x=23, "error bars are 1.96 * SD", cex=.6)
+#Plot CIs
+
+arrows(c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$StrmeanSGTF - Nat_agg$CIsdSGTF), c(.5:length(Nat_agg$Geo[Nat_agg$Geo=="west"]), 14.5, 15.5, seq(17.5, 22.5, by=1),24.5, 25.5), (Nat_agg$StrmeanSGTF + Nat_agg$CIsdSGTF), length=.05, angle=90, code=3 )
+
+legend("topright", legend=c( "West, Field", "West, Greenhouse", "confusus, Field", "confusus, Greenhouse", "East, Field", "East, Greenhouse", "rostratus, Field", "rostratus, Greenhouse"),text.col=GEGeo_colors[c(7,8,1,2,3,4,5,6)], bty="n", cex=.5 ) 
+
+```
+

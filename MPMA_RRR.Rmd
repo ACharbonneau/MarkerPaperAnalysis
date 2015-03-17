@@ -1,0 +1,700 @@
+---
+title: "MarkerPaperMetaAnalysis_Rrr"
+author: "Amanda Charbonneau"
+date: "December 29, 2014"
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 8
+  pdf_document: default
+  word_document: default
+---
+
+```{r Settings, echo=FALSE, message=FALSE}
+
+rm( list=ls())
+source("~/Dropbox/RadishWeedEvolution/MarkerPaperMeta/Functionarium.R")
+source("~/Dropbox/DworkinLabSharedMaterial/scripts/WRP_FUNCTIONS.R")
+require(lme4) #modeling
+require(car) #ANOVA
+require(RColorBrewer)
+require(MuMIn) #summary stats for LMER models
+require(arm) #extractAIC
+
+FlowData <- read.csv("CombinedDataSet.csv")
+FlowData$FlowDate <- as.Date(FlowData$FlowDate)
+FlowData$GermDate <- as.Date(FlowData$GermDate)
+FlowData$PlantDate <- as.Date(FlowData$PlantDate)
+FlowData$DOYPS <- ifelse(FlowData$DOYP < 78, FlowData$DOYP + 287, FlowData$DOYP - 78 )
+FlowData$DOYGS <- ifelse(FlowData$DOYG < 78, FlowData$DOYG + 287, FlowData$DOYG - 78 )
+
+#write.csv(FlowData, "testdata.csv", quote=F, row.names=F)
+
+```
+
+```{r Colors, echo=FALSE}
+
+col_pal1 = brewer.pal(12, "Set3")
+col_pal2 = brewer.pal(8, "Dark2")
+col_pal3 = brewer.pal(12, "Paired")
+
+
+GEGeo_colors <- c( "eastfield"=col_pal3[3], "eastgreenhouse"=col_pal3[4], "nonNativefield"=col_pal3[5], "nonNativegreenhouse"=col_pal3[6], "westfield"=col_pal3[1], "westgreenhouse"=col_pal3[2])
+
+Geo_colors <- c( "west"=col_pal3[1], "east"=col_pal3[3],  "nonNative"=col_pal3[5] )
+
+VernGeo_colors <-  c( "east0"=col_pal3[3],  "nonNative0"=col_pal3[5], "west0"=col_pal3[1], "west30"=col_pal3[2]  )
+
+VernGEGeo_colors <- c( "east0field"=col_pal3[3], "east0greenhouse"=col_pal3[4], "nonNative0field"=col_pal3[5], "nonNative0greenhouse"=col_pal3[6], "west0field"=col_pal3[1], "west0greenhouse"=col_pal3[2], "west30greenhouse"=col_pal3[2]  )
+
+col_pal = c(col_pal1, col_pal2, col_pal3)
+
+```
+
+
+```{r SubsetRrr, echo=FALSE}
+#Subset out only the *R.r. raphanistrum* populations, and re-factor to make the western populations the base.
+
+RrrData <- droplevels(FlowData[FlowData$Taxonomy == "raphanistrum",])
+
+RrrData <- keepCols(RrrData, c("ID", "GTF", "Geography", "Seedstock", "GrowthEnvironment", "DOYGS", "DaysVernNoNA", "Pop", "Experiment", "Habitat", "PTF", "DOYPS", "Native", "PTG", "SurviveGTF"))
+
+
+RrrData$ID <- row.names(RrrData)
+RrrData$Geography <- relevel(RrrData$Geography, "west")
+RrrData$Habitat <- relevel(RrrData$Habitat, "natural")
+RrrData$Ag <- RrrData$Habitat
+levels(RrrData$Ag) <- c("nonag", "ag", "nonag")
+
+
+#write.csv(RrrData, "testRRR.csv", quote=F, row.names=F)
+```
+
+###Does days to flowering differ between native and non-native range populations of *R.r. raphanistrum*?
+*R.r. raphanistrum* is native to the area around the Mediterranean, and it has been suggested that it originated on the western side where Raphanus diversity is highest. We have *R.r. raphanistrum* populations from three main geographic areas: the western side of the Mediterranean (all from France or Spain), the eastern side of the Mediterranean (all from Israel), and non-native. To test whether there is a difference in flowering time between native and non-natives, and also look for differences between native populations on either side of the Mediterranean Sea, we are modeling a subset of the data that only includes *R.r. raphanistrum* populations. 
+
+###Models for *R.r. raphanistrum*
+We want to model days to flowering as a function of Geography. As our datasets were done at different times and places, this is an idealized model which attempts to account for all known sources of variation caused by differences in experimental design. To start, I'm trying five models that are all very similar to each other, and all have the same basic fixed and random effects:
+
+####Fixed Effects
+
+**Geography** allows for each geographic group (east, west and non-native) to have its own intercept
+
+**Seedstock** captures the variation in flowering time due to parental growth environment. Since most populations only have a single parental growth environment, this should only see the effect of the qtl2004 populations, which were all propagated from qtl2003 and lale2005 populations which were propagated from qtl2004.
+
+**GrowthEnvironment** accounts for variation due to the study plant being growth in the greenhouse or field
+
+**DOYGS** (Day of year germinated, standardized) OR **DOYPS** (Day of year planted, standardized) accounts for variation in seasons, as experiments were started at different times of year and so experianced differing growth conditions like length of day and light intensity. We don't have germination date for all plants, but know that some have a gap of weeks-months between germ and flower dates. The 'standardization' is subtracting 78 from each value, then adding 365 to values less than zero, so that all the winter days are together.
+
+**Habitat** accounts for variation due to type of micro-habitat that each population was collected from and may be locally adapted to
+
+**DaysVernNoNA** accounts for whether an individual was vernalized, and for how long
+
+The interaction term **GrowthEnvironment:Geography** allows populations from each geographic region to have independent reactions to **GrowthEnvironment**
+
+####Random Effects
+
+The **Geography**|**Experiment** term accounts for apparent variance among population means due to **Geography** that may be due to differences between **Experiment**s
+
+The **Geography**:**Pop** term finds the variance among population means within each geographic region
+
+Before running the models, here are graphs looking at the data I'm going to use to make sure everything looks like it's imported correctly and to see if any variables look bad (too many NA's, weird data points, etc.)
+
+#####Response variable
+We are modeling days to flowering as the response variable, but we have two different versions of this: **PTF** is planting to flower, which is the amount of time it took from putting the seed in soil until the subsequent plant first flowered. We also have **GTF**, which is germination to flowering. This is the amount of time from when the seedling first emerged from the soil until the plant flowered. Although these are very similar, only one, **PTF**, was recorded in all experiments, however for the experiments where both were recorded many individuals had very large lag times between planting and germination, with a range of `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[1]` to  `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[2]` for both the dataset as a whole, and just the R.r. raphanistrum subset. (The individual that took `r range(FlowData$GermDate - FlowData$PlantDate, na.rm=T)[2]` days was an MAES.)
+
+```{r AllResponsePlots, echo=FALSE, eval=FALSE, fig.width=9}
+par(mfrow=c(2,2))
+hist(FlowData$PTF, probability=T, xlim=c(0,500), breaks=25, main="PTF for entire dataset")
+curve(dnorm(x, mean=mean2(FlowData$PTF), sd=sd2(FlowData$PTF)), col="red", add=T)
+
+plot(FlowData$PTF, col=col_pal3[FlowData$Experiment], main="PTF by experiment")
+text(x=c(rep(600, 4), rep(1700,5)), y=c(475, 425, 375, 325, 475, 425, 375, 325, 275), labels=levels(FlowData$Experiment), col=col_pal3)
+
+hist(FlowData$SurviveGTF, probability=T, xlim=c(0,500), breaks=25)
+curve(dnorm(x, mean=mean2(FlowData$SurviveGTF), sd=sd2(FlowData$SurviveGTF)), col="red", add=T)
+
+plot(FlowData$PTF, col=col_pal3[FlowData$Experiment], type="n", main="SurviveGTF by experiment")
+points(FlowData$SurviveGTF, col=col_pal3[FlowData$Experiment])
+text(x=c(rep(600, 4), rep(1700,5)), y=c(475, 425, 375, 325, 475, 425, 375, 325, 275), labels=levels(FlowData$Experiment), col=col_pal3)
+
+```
+
+
+```{r RrrResponseHist, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+hist(RrrData$PTF, probability = TRUE, xlim=c(0,200), main="PTF histogram", breaks=50)
+curve(dnorm(x, mean=mean2(RrrData$PTF), sd=sd2(RrrData$PTF)), 
+  	add=T, col="red")
+
+plot(RrrData$PTF, col=col_pal3[RrrData$Experiment], main="PTF by experiment", ylab="PTF")
+text(x=c(rep(600, 4), rep(1200,4)), y=c(225, 200, 175, 150, 225, 200, 175, 150), labels=levels(RrrData$Experiment), col=col_pal3)
+
+hist(RrrData$SurviveGTF, probability = TRUE, xlim=c(0,200), main="SurviveGTF histogram", breaks=50)
+curve(dnorm(x, mean=mean2(RrrData$SurviveGTF), sd=sd2(RrrData$SurviveGTF)), 
+    add=T, col="red")
+
+plot(RrrData$PTF, col=RrrData$Experiment, type="n", main="SurviveGTF by experiment", ylab="SurviveGTF") #Plotting as same scale as PTF
+points(RrrData$SurviveGTF, col=col_pal3[RrrData$Experiment])
+text(x=c(rep(600, 4), rep(1200,4)), y=c(225, 200, 175, 150, 225, 200, 175, 150), labels=levels(RrrData$Experiment), col=col_pal3)
+```
+```
+Figure 1. PTF vs. SurviveGTF. 
+We can see that using SurviveGTF only slightly changes the density plot of flowering values, however it drops an entire experiment, gh2006, which appears as light green in the PTF graph. It's also obvious that many individuals within some experiments either didn't have SurviveGTF recorded, or had a very large difference in their PTF and SurviveGTF. Both IS2013 and qst2004 lose most of thier large values in the SurviveGTF graph.
+```
+#####Predictor variables
+These are plots of each predictor variable against the response. For each I have plotted against **PTF** on the left and against **SurviveGTF** on the right.
+
+```{r SeedstockandGeography, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2), las=1)
+plot(RrrData$PTF ~ RrrData$Seedstock, main= "Seedstock", xlab="Seedstock", ylab="PTF", ylim=c(0,250))
+plot(RrrData$SurviveGTF ~ RrrData$Seedstock, main= "Seedstock", xlab="Seedstock", ylab="SurviveGTF", ylim=c(0,250))
+plot(RrrData$PTF ~ RrrData$Geography, main="Geography", xlab="Geography", ylab="PTF", ylim=c(0,250))
+plot(RrrData$SurviveGTF ~ RrrData$Geography, main="Geography", xlab="Geography", ylab="SurviveGTF", ylim=c(0,250))
+```
+
+```{r Habitat, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+
+plot(RrrData$PTF ~ RrrData$Habitat, main="Habitat", xlab="Habitat", ylab="PTF", ylim=c(0,250))
+plot(RrrData$SurviveGTF ~ RrrData$Habitat, main="Habitat", xlab="Habitat", ylab="SurviveGTF", ylim=c(0,250))
+```
+
+
+```
+Figure 2. Variables basically unchanged by switching to SurviveGTF. 
+a. Flowering time distribution of plants whose parents were field collected, versus those whose parents have reduced maternal effects/"lab domestication". b. Geographic region where the population was originally collected in the wild. c. Type of habitat where the population was originally collected in the wild. Although a few data points drop out when plants without a known germination date drop out, the distribution within each factor is basically unchanged for all of these variables.
+```
+
+```{r DOYPS_DOYGS, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+plot(RrrData$PTF ~ RrrData$DOYPS, col=col_pal3[RrrData$Experiment], main="DOYPS", xlab="DOYPS", ylab="PTF", ylim=c(0,250))
+plot(RrrData$SurviveGTF ~ RrrData$DOYGS, col=col_pal3[RrrData$Experiment], main="DOYGS", xlab="DOYGS", ylab="SurviveGTF", ylim=c(0,250))
+```
+
+
+
+```{r Vernalized, echo=FALSE, fig.width=9}
+par(mfrow=c(1,2))
+plot(RrrData$PTF ~ RrrData$DaysVernNoNA, col=col_pal3[RrrData$Experiment], main="Days Vernalized", xlab="DaysVernNoNA", ylab="PTF", ylim=c(0,250))
+plot(RrrData$SurviveGTF ~ RrrData$DaysVernNoNA, col=col_pal3[RrrData$Experiment], main="Days Vernalized", xlab="DaysVernNoNA", ylab="SurviveGTF", ylim=c(0,250))
+
+```
+
+```
+Figure 3. 
+Variables signifigantly altered by using SurviveGTF.
+a. Day of year individual was planted/germinated. Since in most experiments, all individuals were planted at once, DOYP is effectivly a factor that is mostly colinear with experiment. In fact, the on expeiment with varied planting dates, is the gh2006, which has no germination data. DOYG has a much wider spread of dates for each population, so it will behave more like a continuous variable as intended and probably have a better estimate. b. Days Vernalized. This variable was already somewhat suspect because although we are treating it as continuous, in practise it is more like a factor. It happens that the plants that experianced 50 and 70 days of vernalization were also ones that didn't have germination recorded, so in the SurviveGTF model, this is effectively now vernalized: yes or no.
+```
+
+There is a PDF file showing the distribution of flowering times by population (pages 1:22), then a density plot of all those populations overlayed such that the distribution darkens where there is more data (page 23), then a distribution of flowering times by experiment (pages 24:30) at ~/Dropbox/RadishWeedEvolution/MarkerPaperMeta/GTFdistributions.pdf
+
+```{r FloweringTime, echo=FALSE, results='hide'}
+pdf(file = "~/Dropbox/RadishWeedEvolution/MarkerPaperMeta/GTFdistributions.pdf")
+poplist <- list(levels(droplevels(FlowData$Pop[ FlowData$Species !="sativus" & FlowData$Species != "CAHybrid"])))
+exlist <- list(levels(FlowData$Experiment))
+exlist <- exlist[[1]][c(1,2,3,5,6,7,8)]
+
+plotbreaks <- 20 # "Sturges", 100
+frequency <- F
+
+for (name in 1:length(poplist[[1]])){
+
+Shist <- hist(FlowData$SurviveGTF[FlowData$Pop == poplist[[1]][name]], breaks=plotbreaks, plot=F)
+hist(FlowData$GTF[FlowData$Pop == poplist[[1]][name]], breaks=plotbreaks, freq = frequency, col=rgb(0,0,1,1/4), xlim=range(Shist$breaks), main=paste("Raw Germ to Flower, ", poplist[[1]][name]), xlab="GTF")
+
+plot(Shist, freq = frequency, col=rgb(1,0,0,1/4), add=T)
+legend("topright", legend = c("GTF", "SurviveGTF"), bty="n", text.col = c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)))
+}
+
+plot(density(na.omit(FlowData$SurviveGTF[FlowData$Pop == poplist[[1]][1]]), bw=1), xlim=range(na.omit(FlowData$SurviveGTF)), ylim=c(0, .4), col=rgb(0,0,1,1/30), type="h", xlab="SurviveGTF, bandwidth=1", ylab="Density", main="SurviveGTF")
+for (name in 2:length(poplist[[1]])){
+par(new=T)
+plot(density(na.omit(FlowData$SurviveGTF[FlowData$Pop == poplist[[1]][name]]), bw=1), xlim=range(na.omit(FlowData$SurviveGTF)), ylim=c(0, .4), col=rgb(0,0,1,1/32), type="h", main="", xlab="", ylab="")
+}
+
+par(mfrow=c(1,1), new=F)
+for (exp in 1:length(exlist)){
+
+Ehist <- hist(FlowData$SurviveGTF[FlowData$Experiment == exlist[exp]], breaks=60, plot=F)
+hist(FlowData$GTF[FlowData$Experiment == exlist[exp]], breaks=60, freq = frequency, col=rgb(0,0,1,1/4), xlim=range(Ehist$breaks),  main=paste("Raw Germ to Flower, ", exlist[exp]), xlab="GTF")
+plot(Ehist, freq = frequency, col=rgb(1,0,0,1/4), add=T)
+legend("topright", legend = c("GTF", "SurviveGTF"), bty="n", text.col = c(rgb(0,0,1,1/4), rgb(1,0,0,1/4)))
+}
+dev.off()
+```
+
+
+####Modeling
+
+#####Model 1: 
+######Response variable: Days from planting to flowering
+Because we know that **PTF** incorporates a lot of germination latency, this model will likely over-esimate time to flowering considerably. However, we don't have germination dates for one experiment, and I don't know how having a large number of NA's in the response would effect the model. So, this uses planting to flowering as the response, and DOYPS (day of year planted, standardized), which were recorded in all experiments.
+```{r DropGTFNAs, echo=FALSE}
+RrrDataGTF <- RrrData[!is.na(RrrData$GTF),]
+RrrDataGTF <- RrrDataGTF[!is.na(RrrDataGTF$DOYGS),]
+
+```
+
+```{r Model1Rrr, echo=TRUE, eval=TRUE}
+Rrr_lmer_1 <- lmer( PTF ~ Geography + Seedstock + GrowthEnvironment + DOYPS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography + (1 + Geography|Experiment) + (1|Geography:Pop), data=RrrDataGTF  )
+
+```
+
+#####Model 8:
+######Model 2, but without Habitat and the **Geography**|**Experiment** random effect changed to just 1|**Experiment**
+
+```{r Model8Rrr, echo=TRUE, eval=TRUE}
+
+Rrr_lmer_8 <- lmer( GTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + DaysVernNoNA + GrowthEnvironment:Geography + (1|Experiment) + (1|Geography:Pop), data=RrrDataGTF  )
+
+```
+
+#####Model 13:
+######Response variable: Days from germination to flowering
+Here, I'm using germination to flowering (or last alive date) as the response, which will be more accurate than planting to flowering, but have many more NA's. 
+
+```{r DropSurviveNAs, echo=FALSE}
+RrrDataSurvive<- RrrData[!is.na(RrrData$SurviveGTF),]
+RrrDataSurvive <- RrrDataSurvive[!is.na(RrrDataSurvive$DOYGS),]
+
+```
+
+```{r Model13Rrr, echo=TRUE, eval=TRUE}
+
+Rrr_lmer_13 <- lmer( SurviveGTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + DaysVernNoNA + GrowthEnvironment:Geography + (1|Experiment) + (1|Geography:Pop), data=RrrDataSurvive  )
+
+```
+
+#####Model 14:
+######Response variable: Days from germination to flowering
+Here, I'm using germination to flowering (or last alive date) as the response, which will be more accurate than planting to flowering, but have many more NA's. Dropping the GrowthEnvironment variables.
+```{r Model14Rrr, echo=TRUE, eval=TRUE}
+
+Rrr_lmer_14 <- lmer( SurviveGTF ~ Geography + Seedstock + DOYGS + DaysVernNoNA + (1|Experiment) + (1|Geography:Pop), data=RrrDataSurvive  )
+
+```
+
+
+```{r LMERsummary, echo=FALSE}
+LMERlist <- list( Rrr_lmer_1, Rrr_lmer_8, Rrr_lmer_13, Rrr_lmer_14)
+
+SummaryLMER <- list(rep(NA, length(LMERlist)))
+
+```
+
+```{r LMER_ANOVA, echo=FALSE, results='hide'}
+for (i in 1:length(LMERlist)){
+SummaryLMER[[i]]  <- summary( LMERlist[[i]] )
+print(car::Anova(LMERlist[[i]]) )
+}
+```
+
+####Model Results
+**Fixed Effects** (std.err) | M1: Response PTF | M8: Response GTF | M13: Response SurviveGTF | M13: SurviveGTF, no F/GH 
+---------|--------|---------|---------|---------
+GeographyWest | `r round(SummaryLMER[[1]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["(Intercept)",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["(Intercept)",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["(Intercept)",2],2)`) 
+GeographyEast | `r round(SummaryLMER[[1]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["Geographyeast",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["Geographyeast",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["Geographyeast",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["Geographyeast",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["Geographyeast",2],2)`) 
+GeographyNonNative | `r round(SummaryLMER[[1]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GeographynonNative",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["GeographynonNative",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["GeographynonNative",2],2)`) 
+SeedstockGreenhouse | `r round(SummaryLMER[[1]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["SeedstockGreenhouse",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["SeedstockGreenhouse",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["SeedstockGreenhouse",2],2)`) 
+GroEnvirGreenhouse | `r round(SummaryLMER[[1]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GrowthEnvironmentgreenhouse",2],2)`) | NA
+DOYGS or DOYPS | `r round(SummaryLMER[[1]]$coefficients["DOYPS",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["DOYPS",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["DOYGS",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["DOYGS",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["DOYGS",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["DOYGS",2],2)`) 
+DaysVernNoNA | `r round(SummaryLMER[[1]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["DaysVernNoNA",2],2)`) | `r round(SummaryLMER[[4]]$coefficients["DaysVernNoNA",1], 1)` (`r round(SummaryLMER[[4]]$coefficients["DaysVernNoNA",2],2)`) 
+GeoEast:GroEnvirGreenhouse | `r round(SummaryLMER[[1]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["Geographyeast:GrowthEnvironmentgreenhouse",2],2)`) | NA
+GeoNonNative:GroEnvirGreenhouse | `r round(SummaryLMER[[1]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[1]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[2]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[2]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | `r round(SummaryLMER[[3]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",1], 1)` (`r round(SummaryLMER[[3]]$coefficients["GeographynonNative:GrowthEnvironmentgreenhouse",2],2)`) | NA
+
+**Random Effects** std.dev | M1: Response PTF | M8: Response GTF | M13: Response SurviveGTF
+---------|--------|---------|---------
+Geography:Pop  | `r round(sqrt(VarCorr(LMERlist[[1]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$"Geography:Pop"[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$"Geography:Pop"[1]) ,2)` 
+Geographywest by Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[1]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[1]) ,2)` 
+Geographyeast by Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[5]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[5]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[5]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[5]) ,2)` 
+GeographynonNative by Experiment | `r round(sqrt(VarCorr(LMERlist[[1]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[2]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[3]])$Experiment[9]) ,2)` | `r round(sqrt(VarCorr(LMERlist[[4]])$Experiment[9]) ,2)` 
+
+>As you can see from the tables above, models one and thirteen give a much higher point estimate for base days to flowering. 
+These models results are all pretty different from each other. This is not terribly surprising since they're all using somewhat different data sets, but the results are anywhere from pretty similar to hyper-variable. For instance, the effect of having a parent grown in the greenhouse is 109 days in model 1, but -19 days in model 13, but the effect of vernalization is always about a day and a half per day vernalized. 
+As different as the estimates are, you can also see that they all explain the data equally well:
+
+```{r LMER_goodness, echo=FALSE, fig.height=8}
+par(mfrow=c(2,2))
+for (i in c(1:4)){
+plot(fitted(LMERlist[[i]]) ~ LMERlist[[i]]@resp$y, main= c("Response plot",i ), xlab="Response", ylab="Fitted")
+abline(0, 1, col="red")
+text(min(LMERlist[[i]]@resp$y)+15, c(max(fitted(LMERlist[[i]])), max(fitted(LMERlist[[i]])-8)), labels=c("corr=", round(cor(fitted(LMERlist[[i]]), LMERlist[[i]]@resp$y), 2)))
+}
+
+for (i in c(1:4)){
+plot(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]]), main=c("Residual plot", i), ylab="Residuals", xlab="Fitted")
+lines(lowess(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]])), col="red")
+#lines(smooth.spline(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]])), col="green")
+#abline(lm(resid(LMERlist[[i]]) ~ fitted(LMERlist[[i]])), col="blue" )
+#text("topright", labels=r.squaredGLMM(LMERlist[[i]]))
+#print(importance(LMERlist[[i]]))
+}
+
+for (i in c(1:4)){
+qqnorm(resid(LMERlist[[i]]), main=c("Q-Q plot for residuals", i))
+qqline(resid(LMERlist[[i]]))
+}
+```
+
+>While model thirteen has a somewhat higher correlation between the fitted, and response values, it has much less uniform residuals, so it's difficult to say if the model is any better than the others. 
+
+```{r lm_tests1, echo=FALSE, eval=TRUE}
+Rrr_lm_1 <- lm(PTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography,  data=RrrDataGTF, y=T)
+Rrr_lm_8 <- lm(GTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography,  data=RrrDataGTF, y=T)
+
+Rrr_lm_13 <- lm(SurviveGTF ~ Geography + Seedstock + GrowthEnvironment + DOYGS + Habitat + DaysVernNoNA + GrowthEnvironment:Geography,  data=RrrDataSurvive, y=T)
+Rrr_lm_14 <- lm(SurviveGTF ~ Geography + Seedstock + DOYGS + Habitat + DaysVernNoNA,  data=RrrDataSurvive, y=T)
+
+```
+
+```{r lm_vif, echo=FALSE}
+car::vif(Rrr_lm_1)
+car::vif(Rrr_lm_8)
+car::vif(Rrr_lm_13)
+car::vif(Rrr_lm_14)
+```
+
+>However, if we look at the variance inflation factor, that is, how much each predictor is contributing to the overall variance, both the **PTF** model and model 8 with **GTF** have a lot of variance inflation at the predictors using **Geography**. Model 13 still has a pretty high VIF, **Geography** variance is 80 times larger than most other factors, but it's still half as high as the other models.
+
+```{r ModelBootstrapFunctions, echo=FALSE}
+iter <- 1000
+
+grabmeans <- function( mermod ){
+  return( mermod@resp$mu )
+}
+
+grabresiduals <- function( mermod ){
+  return(c(summary(mermod)$coefficients["(Intercept)",1], summary(mermod)$coefficients["SeedstockGreenhouse",1], mermod@resp$wtres))
+}
+
+twostageboot <- function(firstmodel, secondmodelbits, data){
+  firstboot <- bootMer( firstmodel, FUN= grabresiduals, nsim=1, type="parametric")
+  NoNusValues<- firstboot$t[3:length(firstboot$t)] + #residuals
+      firstboot$t[1] + #intercept
+      (firstboot$t[2] * #estimate for seedstock effect
+      table(firstboot$data$Seedstock)[[2]] / length(firstboot$data$Seedstock)) #weight days by number of plants with parents from each seedstock
+  secondmodel <- as.formula(paste( "NoNusValues", secondmodelbits ))
+  secondmodel <- lmer(secondmodel, data=data)
+  secondboot <- bootMer( secondmodel, FUN=grabmeans, nsim=1, type="parametric")
+  secondboot$t 
+}
+
+
+```
+
+
+```{r}
+
+# Matrix to hold bootstrap values
+GTFresults <- matrix(nrow=iter, ncol=length(RrrDataGTF$Pop))
+GTFresultsVern <- matrix(nrow=iter, ncol=length(RrrDataGTF$Pop))
+Surviveresults <- matrix(nrow=iter, ncol=length(RrrDataSurvive$Pop))
+SurviveresultsVern <- matrix(nrow=iter, ncol=length(RrrDataSurvive$Pop))
+M14results <- matrix(nrow=iter, ncol=length(RrrDataSurvive$Pop))
+M14resultsVern <- matrix(nrow=iter, ncol=length(RrrDataSurvive$Pop))
+
+# Model pairs
+NoNusGTF <- lmer(GTF  ~ Seedstock + DOYGS + DaysVernNoNA + (1|Experiment), data=RrrDataGTF)
+ResidModelGTF <- "~ Geography * GrowthEnvironment + (1|Geography:Pop)"
+
+NoNusGTFVern <- lmer(GTF  ~ Seedstock + DOYGS + (1|Experiment), data=RrrDataGTF)
+ResidModelGTFVern <-  "~ Geography * GrowthEnvironment + DaysVernNoNA +  (1|Geography:Pop)"
+
+NoNusSurvive  <- lmer(SurviveGTF  ~ Seedstock + DOYGS + DaysVernNoNA + (1|Experiment), data=RrrDataSurvive)
+ResidModelSurvive <- "~ Geography * GrowthEnvironment + (1|Geography:Pop)"
+
+NoNusSurviveVern  <- lmer(SurviveGTF  ~ Seedstock + DOYGS + (1|Experiment), data=RrrDataSurvive)
+ResidModelSurviveVern <- "~ Geography * GrowthEnvironment + DaysVernNoNA + (1|Geography:Pop)"
+
+NoNus14 <- lmer(SurviveGTF  ~ Seedstock + DOYGS + DaysVernNoNA + (1|Experiment), data=RrrDataSurvive)
+ResidModel14 <- "~ Geography + (1|Geography:Pop)"
+
+NoNus14Vern <- lmer(SurviveGTF  ~ Seedstock + DOYGS + (1|Experiment), data=RrrDataSurvive)
+ResidModel14Vern <- "~ Geography + DaysVernNoNA + (1|Geography:Pop)"
+
+
+for( i in 1:iter){
+  GTFresults[i, ]     <- twostageboot( NoNusGTF, ResidModelGTF, RrrDataGTF)
+  GTFresultsVern[i, ]  <- twostageboot( NoNusGTFVern, ResidModelGTFVern, RrrDataGTF)
+  Surviveresults[i, ] <- twostageboot( NoNusSurvive, ResidModelSurvive, RrrDataSurvive)
+  SurviveresultsVern[i, ] <- twostageboot( NoNusSurviveVern, ResidModelSurviveVern, RrrDataSurvive)
+  M14results[i, ]     <- twostageboot( NoNus14, ResidModel14, RrrDataSurvive)
+  M14resultsVern[i, ] <- twostageboot( NoNus14Vern, ResidModel14Vern, RrrDataSurvive)
+}
+
+```
+
+
+```{r, OneModelCIs, echo=FALSE}
+
+singlemodelboot <- function(firstmodel, secondmodelbits, data){
+  #firstboot <- bootMer( firstmodel, FUN= grabresiduals, nsim=1, type="parametric")
+  #NoNusValues<- firstboot$t[3:length(firstboot$t)] + #residuals
+  #    firstboot$t[1] + #intercept
+  #    (firstboot$t[2] * #estimate for seedstock effect
+  #    table(firstboot$data$Seedstock)[[2]] / length(firstboot$data$Seedstock)) #weight days by number of plants with parents from each seedstock
+  NoNusValues<- firstmodel@resp$wtres + #residuals
+      summary(firstmodel)$coefficients["(Intercept)",1] + #intercept
+      (summary(firstmodel)$coefficients["SeedstockGreenhouse",1] * #estimate for seedstock effect
+      length(firstmodel@frame$Seedstock[firstmodel@frame$Seedstock == "Greenhouse"]) / length(firstmodel@frame$Seedstock)) #weight days by number of plants with parents from each seedstock
+  secondmodel <- as.formula(paste( "NoNusValues", secondmodelbits ))
+  secondmodel <- lmer(secondmodel, data=data)
+  secondboot <- bootMer( secondmodel, FUN=grabmeans, nsim=iter, type="parametric")
+  list(secondmodel@resp$mu, secondboot$t)
+}
+
+twostagemodelmeans <- function(firstmodel, secondmodelbits, data){
+  NoNusValues<- firstmodel@resp$wtres + #residuals
+      summary(firstmodel)$coefficients["(Intercept)",1] + #intercept
+      (summary(firstmodel)$coefficients["SeedstockGreenhouse",1] * #estimate for seedstock effect
+      length(firstmodel@frame$Seedstock[firstmodel@frame$Seedstock == "Greenhouse"]) / length(firstmodel@frame$Seedstock)) #weight days by number of plants with parents from each seedstock
+  secondmodel <- as.formula(paste( "NoNusValues", secondmodelbits ))
+  secondmodel <- lmer(secondmodel, data=data)
+  secondmodel@resp$mu
+}
+
+GTFboot <- singlemodelboot(NoNusGTF, ResidModelGTF, RrrDataGTF)
+GTFvernboot <- singlemodelboot( NoNusGTFVern, ResidModelGTFVern, RrrDataGTF)
+Surviveboot <- singlemodelboot( NoNusSurvive, ResidModelSurvive, RrrDataSurvive)
+SurviveVernboot <- singlemodelboot( NoNusSurviveVern, ResidModelSurviveVern, RrrDataSurvive)
+M14boot <- singlemodelboot( NoNus14, ResidModel14, RrrDataSurvive)
+M14Vernboot <- singlemodelboot( NoNus14Vern, ResidModel14Vern, RrrDataSurvive)
+
+```
+
+```{r JustAverages, echo=FALSE}
+
+require( plyr )
+StrAvg <- ddply( RrrData, .(Pop, GrowthEnvironment, DaysVernNoNA), summarize, meanGTF=mean2( GTF ), sdGTF= (1.96 * sd2( GTF )), meanSGTF=mean2( SurviveGTF ), sdSGTF=(1.96 * sd2( SurviveGTF )) )
+
+
+names(StrAvg) <- c("Pop", "GE", "Vern", "meanGTF", "CIsdGTF", "meanSGTF", "CIsdSGTF")
+
+StrAvg  <- StrAvg[ is.na(StrAvg$meanSGTF) == F, ]
+```
+
+
+```{r aggregate, echo=FALSE}
+
+# for both models, bind model averages and bootstrap quantiles with metadata
+RM_GTF <- cbind(RrrDataGTF$ID, RrrDataGTF$Pop, RrrDataGTF$GrowthEnvironment, RrrDataGTF$Geography, RrrDataGTF$DaysVernNoNA,
+                data.frame(twostagemodelmeans(NoNusGTF, ResidModelGTF, RrrDataGTF)),
+                data.frame(twostagemodelmeans(NoNusGTFVern, ResidModelGTFVern, RrrDataGTF)),
+                t(apply( GTFresults, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #two stage bootstrap
+                t(apply( GTFresultsVern, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #two stage bootstrap modeling vernalization
+                t(apply( GTFboot[2][[1]], MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #just second model, parametric
+                t(apply( GTFvernboot[2][[1]], MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))) ) #just second model, with vern parametric
+
+RM_Survive <- cbind(RrrDataSurvive$ID, RrrDataSurvive$Pop, RrrDataSurvive$GrowthEnvironment, RrrDataSurvive$Geography, RrrDataSurvive$DaysVernNoNA, 
+                    data.frame(twostagemodelmeans(NoNusSurvive, ResidModelSurvive, RrrDataSurvive)),
+                    data.frame(twostagemodelmeans(NoNusSurviveVern, ResidModelSurviveVern, RrrDataSurvive)),
+                    t(apply( Surviveresults, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #two stage bootstrap
+                    t(apply( SurviveresultsVern, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #two stage bootstrap modeling vernalization
+                    t(apply( Surviveboot[2][[1]], MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #just second model, parametric
+                    t(apply( SurviveVernboot[2][[1]], MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))) ) #just second model, with vern parametric
+
+RM_M14 <- cbind(RrrDataSurvive$ID, RrrDataSurvive$Pop, RrrDataSurvive$GrowthEnvironment, RrrDataSurvive$Geography, RrrDataSurvive$DaysVernNoNA,
+                    data.frame(twostagemodelmeans(NoNus14, ResidModel14, RrrDataSurvive)), #data.frame(ResidModel14@resp$mu)
+                    data.frame(twostagemodelmeans(NoNus14Vern, ResidModel14Vern, RrrDataSurvive)),
+                    t(apply( M14results, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #two stage bootstrap
+                    t(apply( M14resultsVern, MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #two stage bootstrap modeling vernalization
+                    t(apply( M14boot[2][[1]], MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))), #just second model, parametric
+                    t(apply( M14Vernboot[2][[1]], MARGIN=2, FUN=quantile, probs=c(0.025, 0.975))) ) #just second model, with vern parametric
+
+names(RM_GTF) <- c("ID", "Pop", "GE", "Geo", "Vern", "GTF", "vernGTF", "GTFLQ", "GTFHQ", "GTFvernLQ", "GTFvernHQ", "GTFpL", "GTFpH","GTFpvL","GTFpvH")
+names(RM_Survive) <- c("ID", "Pop", "GE", "Geo", "Vern","SurviveGTF", "SvernGTF", "SurLQ", "SurHQ", "SURvernLQ", "SURvernHQ","SurpL", "SurpH", "SurpvL", "SurpvH")
+names(RM_M14) <- c("ID", "Pop", "GE", "Geo", "Vern","M14GTF", "M14vernGTF", "M14LQ", "M14HQ", "M14vernLQ", "M14vernHQ","M14pL", "M14pH", "M14pvL", "M14pvH")
+
+# aggregate the values so each population has a mean for each growth enviornment 
+
+RM_Sum_GTF <- aggregate(RM_GTF[,6:length(names(RM_GTF))], by=list( "Pop"=RM_GTF$Pop, "Geo"=RM_GTF$Geo, "GE"=RM_GTF$GE , "Vern"= RM_GTF$Vern), FUN=mean)
+RM_Sum_Survive <- aggregate(RM_Survive[,6:length(names(RM_Survive))], by=list( "Pop"=RM_Survive$Pop, "Geo"=RM_Survive$Geo, "GE"=RM_Survive$GE, "Vern"=RM_Survive$Vern ), FUN=mean)
+RM_Sum_M14 <- aggregate(RM_M14[,6:length(names(RM_Survive))], by=list( "Pop"=RM_M14$Pop, "Geo"=RM_M14$Geo, "GE"=RM_M14$GE, "Vern"=RM_M14$Vern), FUN=mean)
+
+names(RM_Sum_GTF) <- c("Pop", "Geo", "GE", "Vern","GTF", "vernGTF", "GTFLQ", "GTFHQ", "GTFvernLQ", "GTFvernHQ", "GTFpL", "GTFpH","GTFpvL","GTFpvH")
+names(RM_Sum_Survive) <- c("Pop", "Geo", "GE", "Vern","SurviveGTF", "SvernGTF", "SurLQ", "SurHQ", "SURvernLQ", "SURvernHQ", "SurpL", "SurpH", "SurpvL", "SurpvH")
+names(RM_Sum_M14) <- c("Pop", "Geo", "GE", "Vern","M14GTF", "M14vernGTF", "M14LQ", "M14HQ", "M14vernLQ", "M14vernHQ", "M14pL", "M14pH", "M14pvL", "M14pvH")
+
+# Merge the three models into a single dataframe
+RM_Sum_All <- merge(RM_Sum_GTF, RM_Sum_Survive, by.y=c("Pop", "Geo", "GE", "Vern"), by.x=c("Pop", "Geo", "GE", "Vern"))
+RM_Sum_All <- merge(RM_Sum_All, RM_Sum_M14, by.y=c("Pop", "Geo", "GE", "Vern"), by.x=c("Pop", "Geo", "GE", "Vern"))
+
+# Merge in an N for each dataframe
+GTFNtable <- as.data.frame(table(RrrDataGTF$Pop, RrrDataGTF$GrowthEnvironment, RrrDataGTF$DaysVernNoNA))
+names(GTFNtable) <- c("Pop", "GE", "Vern", "GTFN")
+
+SurviveNtable <- as.data.frame(table(RrrDataSurvive$Pop, RrrDataSurvive$GrowthEnvironment, RrrDataSurvive$DaysVernNoNA))
+names(SurviveNtable) <- c("Pop", "GE", "Vern", "SurN")
+
+RM_Sum_All <- merge(RM_Sum_All, GTFNtable)
+
+RM_Sum_All <- merge(RM_Sum_All, SurviveNtable)
+
+RM_Sum_All <- merge(RM_Sum_All, StrAvg)
+
+# Add in new plotting variables, and order by geography
+
+RM_Sum_All$GEGeo <- as.factor(paste(RM_Sum_All$Geo, RM_Sum_All$GE, sep=""))
+RM_Sum_All$VernGEGeo <- as.factor(paste(RM_Sum_All$Geo, RM_Sum_All$Vern, RM_Sum_All$GE, sep=""))
+RM_Sum_All$GEGeoColor <-  as.factor(GEGeo_colors[RM_Sum_All$GEGeo])
+RM_Sum_All$VernGEGeoColor <- as.factor(VernGEGeo_colors[RM_Sum_All$VernGEGeo])
+RM_Sum_All$VernLevel <- ifelse(RM_Sum_All$Vern != 0, RM_Sum_All$Vern, NA)
+RM_Sum_All <- RM_Sum_All[order( RM_Sum_All$Geo, partial=RM_Sum_All$Pop ), ]
+
+RM_noGH <- data.frame(RM_Sum_All$Pop, RM_Sum_All$Geo, RM_Sum_All$Vern, RM_Sum_All$M14GTF, RM_Sum_All$M14vernGTF, RM_Sum_All$M14LQ, RM_Sum_All$M14HQ, RM_Sum_All$M14vernLQ, RM_Sum_All$M14vernHQ, RM_Sum_All$M14pL, RM_Sum_All$M14pH, RM_Sum_All$M14pvL, RM_Sum_All$M14pvH)
+
+RM_noGH_N <- data.frame(RM_Sum_All$Pop, RM_Sum_All$Geo, RM_Sum_All$Vern, RM_Sum_All$SurN )
+names(RM_noGH_N) <- c("Pop", "Geo", "Vern", "SurN")
+names(RM_noGH) <- c("Pop", "Geo", "Vern", "M14GTF", "M14vernGTF", "M14LQ", "M14HQ", "M14vernLQ", "M14vernHQ", "M14pL", "M14pH", "M14pvL", "M14pvH")
+RM_noGH_N <- aggregate(RM_noGH_N[, 4], by=list("Pop"=RM_noGH_N$Pop, "Geo"=RM_noGH_N$Geo, "Vern"=RM_noGH_N$Vern), FUN=sum)
+RM_aggGH <- aggregate(RM_noGH[, 4:length(names(RM_noGH))], by=list("Pop"=RM_noGH$Pop, "Geo"=RM_noGH$Geo, "Vern"=RM_noGH$Vern), FUN=mean) 
+RM_noGH <- merge(RM_aggGH, RM_noGH_N)
+names(RM_noGH)  <-  c("Pop", "Geo", "Vern", "M14GTF", "M14vernGTF", "M14LQ", "M14HQ", "M14vernLQ", "M14vernHQ", "M14pL", "M14pH", "M14pvL", "M14pvH", "SurN")
+RM_noGH$VernGeo <- as.factor(paste(RM_noGH$Geo, RM_noGH$Vern, sep=""))
+RM_noGH$VernGeoColor <- as.factor(VernGeo_colors[RM_noGH$VernGeo])
+RM_noGH$GeoColor <-  as.factor(Geo_colors[RM_noGH$Geo])
+RM_noGH$VernLevel <- ifelse(RM_noGH$Vern != 0, RM_noGH$Vern, NA)
+RM_noGH <- RM_noGH[order( RM_noGH$Geo, partial=RM_noGH$Pop ), ]
+
+RM_noVern  <- aggregate(RM_Sum_All[, c(5:(length(names(RM_Sum_All))-5))], by=list("Pop"=RM_Sum_All$Pop, "GE"=RM_Sum_All$GE, "Geo"=RM_Sum_All$Geo, "GEGeo"=RM_Sum_All$GEGeo, "GEGeoColor"=RM_Sum_All$GEGeoColor), FUN=mean)
+RM_noVernN <- aggregate(RM_Sum_All[, 35], by=list("Pop"=RM_Sum_All$Pop, "GE"=RM_Sum_All$GE, "Geo"=RM_Sum_All$Geo, "GEGeo"=RM_Sum_All$GEGeo, "GEGeoColor"=RM_Sum_All$GEGeoColor), FUN=sum)
+RM_noVernsurN <- aggregate(RM_Sum_All[, 36], by=list("Pop"=RM_Sum_All$Pop, "GE"=RM_Sum_All$GE, "Geo"=RM_Sum_All$Geo, "GEGeo"=RM_Sum_All$GEGeo, "GEGeoColor"=RM_Sum_All$GEGeoColor), FUN=sum)
+names(RM_noVernN) <- c("Pop", "GE", "Geo", "GEGeo", "GEGeoColor", "GTFNx")
+names(RM_noVernsurN) <- c("Pop", "GE", "Geo", "GEGeo", "GEGeoColor", "SurNx")
+RM_noVern <- merge(RM_noVern, RM_noVernN)
+RM_noVern <- merge(RM_noVern, RM_noVernsurN)
+RM_noVern$GTFN  <- RM_noVern$GTFNx
+RM_noVern$SurN  <- RM_noVern$SurNx
+RM_noVern  <- RM_noVern[order( RM_noVern$Geo, partial=RM_noVern$Pop ), ]
+
+```
+###Plots of Model values
+Here, I'm concurently plotting the results from models eight, thirteen and fourteen
+```{r plotModels, echo=FALSE, fig.height=4, warning=FALSE}
+par(mfrow=c(1,1), las=2)
+
+# Plot model 8 population estimates
+
+barplot(height=RM_noVern$GTF, names.arg=RM_noVern$Pop, cex.names=.75, col=as.character(RM_noVern$GEGeoColor), space=c(rep(0, length(RM_noVern$Geo[RM_noVern$Geo=="west"])), 1, rep(0,(length(RM_noVern$Geo[RM_noVern$Geo=="east"])-1)), 1, rep(0,(length(RM_noVern$Geo[RM_noVern$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Model 8\nOriginal response variable" ) 
+
+#Plot N below bars
+
+text(y=-3, x=c(.5:length(RM_noVern$Geo[RM_noVern$Geo=="west"])), labels=RM_noVern$GTFN[RM_noVern$Geo=="west"], cex=.6)
+text(y=-3, x=seq(9.5, 14.5, by=1), labels=RM_noVern$GTFN[RM_noVern$Geo=="east"], cex=.6)
+text(y=-3, x=seq(16.5, 29.5, by=1), labels=RM_noVern$GTFN[RM_noVern$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=25, "error bars are parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(seq(.5, 7.5, 1), seq(9.5, 14.5, 1), seq(16.5, 29.5, 1)), RM_noVern$GTFpL, c(seq(.5, 7.5, 1), seq(9.5, 14.5, 1), seq(16.5, 29.5, 1)), RM_noVern$GTFpH,length=.05, angle=90, code=3 )
+
+legend("topright", legend=c(  "West, Field", "West, Greenhouse", "East, Field", "East, Greenhouse", "NonNative, Field", "NonNative, Greenhouse"),text.col=GEGeo_colors[c(5,6,1,2,3,4)], bty="n", cex=.5 ) 
+
+# plot model 8 population estimates with vernalization
+
+barplot(height=RM_Sum_All$vernGTF, names.arg=RM_Sum_All$Pop, cex.names=.75, col=as.character(RM_Sum_All$VernGEGeoColor), density=RM_Sum_All$VernLevel, space=c(rep(0, length(RM_Sum_All$Geo[RM_Sum_All$Geo=="west"])), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="east"])-1)), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Model 8\nOriginal response variable, with vernalization" ) 
+
+#Plot N below bars
+
+text(y=-3, x=c(.5:length(RM_Sum_All$Geo[RM_Sum_All$Geo=="west"])), labels=RM_Sum_All$GTFN[RM_Sum_All$Geo=="west"], cex=.6)
+text(y=-3, x=seq(10.5, 15.5, by=1), labels=RM_Sum_All$GTFN[RM_Sum_All$Geo=="east"], cex=.6)
+text(y=-3, x=seq(17.5, 30.5, by=1), labels=RM_Sum_All$GTFN[RM_Sum_All$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=25, "error bars are parametric BS of second model only", cex=.6)
+#Plot CIs
+
+arrows(c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), RM_Sum_All$GTFpvL, c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), RM_Sum_All$GTFpvH, length=.05, angle=90, code=3 )
+
+legend("topright", legend=c(  "West, Field", "West, Greenhouse", "West, Greenhouse, Vernalized", "East, Field", "East, Greenhouse", "NonNative, Field", "NonNative, Greenhouse"),text.col=GEGeo_colors[c(5,6,6,1,2,3,4)], bty="n", cex=.5, fill=GEGeo_colors[c(5,6,6,1,2,3,4)], density=c(NA, NA, 30, NA, NA, NA, NA) ) 
+
+
+# Plot model 13 population estimates
+
+barplot(height=RM_noVern$SurviveGTF, names.arg=RM_noVern$Pop, cex.names=.75, col=as.character(RM_noVern$GEGeoColor), space=c(rep(0, length(RM_noVern$Geo[RM_noVern$Geo=="west"])), 1, rep(0,(length(RM_noVern$Geo[RM_noVern$Geo=="east"])-1)), 1, rep(0,(length(RM_noVern$Geo[RM_noVern$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Model 13\nSurvivor response variable" ) 
+
+text(y=-3, x=seq(.5, 7.5, 1), labels=RM_noVern$SurN[RM_noVern$Geo=="west"], cex=.6)
+text(y=-3, x=seq(9.5, 14.5, by=1), labels=RM_noVern$SurN[RM_noVern$Geo=="east"], cex=.6)
+text(y=-3, x=seq(16.5, 30.5, by=1), labels=RM_noVern$SurN[RM_noVern$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=25, "error bars are parametric BS of second model only", cex=.6)
+
+legend("topright", legend=c(  "West, Field", "West, Greenhouse", "East, Field", "East, Greenhouse", "NonNative, Field", "NonNative, Greenhouse"),text.col=GEGeo_colors[c(5,6,1,2,3,4)], bty="n", cex=.5 ) 
+
+arrows(c(seq(.5, 7.5, 1), seq(9.5, 14.5, 1), seq(16.5, 29.5, 1)), RM_noVern$SurpL, c(seq(.5, 7.5, 1), seq(9.5, 14.5, 1), seq(16.5, 29.5, 1)), RM_noVern$SurpH,length=.05, angle=90, code=3 )
+
+# Plot model 13 population estimates including vernalization
+barplot(height=RM_Sum_All$SvernGTF, names.arg=RM_Sum_All$Pop, cex.names=.75, col=as.character(RM_Sum_All$VernGEGeoColor), density=RM_Sum_All$VernLevel, space=c(rep(0, length(RM_Sum_All$Geo[RM_Sum_All$Geo=="west"])), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="east"])-1)), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Model 13\nSurvivor response variable, with vernalization" ) 
+
+text(y=-3, x=seq(.5, 8.5, 1), labels=RM_Sum_All$SurN[RM_Sum_All$Geo=="west"], cex=.6)
+text(y=-3, x=seq(10.5, 15.5, by=1), labels=RM_Sum_All$SurN[RM_Sum_All$Geo=="east"], cex=.6)
+text(y=-3, x=seq(17.5, 30.5, by=1), labels=RM_Sum_All$SurN[RM_Sum_All$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=25, "error bars are parametric BS of second model only", cex=.6)
+
+legend("topright", legend=c(  "West, Field", "West, Greenhouse", "West, Greenhouse, Vernalized", "East, Field", "East, Greenhouse", "NonNative, Field", "NonNative, Greenhouse"),text.col=GEGeo_colors[c(5,6,6,1,2,3,4)], bty="n", cex=.5, fill=GEGeo_colors[c(5,6,6,1,2,3,4)], density=c(NA, NA, 30, NA, NA, NA, NA)) 
+
+arrows(c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)),RM_Sum_All$SurpvL, c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), RM_Sum_All$SurpvH, length=.05, angle=90, code=3 )
+
+# Plot model 14 population estimates
+
+barplot(height=RM_noGH$M14GTF[c(1:6, 8:length(RM_noGH$M14GTF)) ], names.arg=RM_noGH$Pop[c(1:6, 8:length(RM_noGH$M14GTF)) ], cex.names=.75, col=as.character(RM_noGH$GeoColor)[c(1:6, 8:length(RM_noGH$M14GTF)) ], space=c(rep(0, length(RM_noGH$Geo[RM_noGH$Geo=="west"])-1), 1, rep(0,(length(RM_noGH$Geo[RM_noGH$Geo=="east"])-1)), 1, rep(0,(length(RM_noGH$Geo[RM_noGH$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Model 14\nSurvivor, no GH/Field" ) 
+
+text(y=-3, x=seq(.5, 5.5, 1),  labels=RM_noGH$SurN[RM_noGH$Geo=="east"][1:5], cex=.6)
+text(y=-3, x=seq(7.5, 11.5, 1), labels=RM_noGH$SurN[RM_noGH$Geo=="east"], cex=.6)
+text(y=-3, x=seq(13.5, 22.5, 1), labels=RM_noGH$SurN[RM_noGH$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=20, "error bars are parametric BS of second model only", cex=.6)
+
+legend("topright", legend=c( "West", "East", "NonNative"),text.col=Geo_colors[c(1,2,3)], bty="n", cex=.8 ) 
+
+arrows(c(seq(.5, 5.5, 1), seq(7.5, 11.5, 1), seq(13.5, 22.5, 1)), RM_noGH$M14pL[c(1:6, 8:length(RM_noGH$M14GTF)) ], c(seq(.5, 5.5, 1), seq(7.5, 11.5, 1), seq(13.5, 22.5, 1)), RM_noGH$M14pH[c(1:6, 8:length(RM_noGH$M14GTF)) ],length=.05, angle=90, code=3 )
+
+# Plot model 14 population estimates with vernalization
+
+barplot(height=RM_noGH$M14vernGTF, names.arg=RM_noGH$Pop, cex.names=.75, col=as.character(RM_noGH$VernGeoColor), density=RM_noGH$VernLevel, space=c(rep(0, length(RM_noGH$Geo[RM_noGH$Geo=="west"])), 1, rep(0,(length(RM_noGH$Geo[RM_noGH$Geo=="east"])-1)), 1, rep(0,(length(RM_noGH$Geo[RM_noGH$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Model 14\nSurvivor, no GH/Field, with vernalization" ) 
+
+text(y=-3, x=c(.5:length(RM_noGH$Geo[RM_noGH$Geo=="west"])), labels=RM_noGH$SurN[RM_noGH$Geo=="west"], cex=.6)
+text(y=-3, x=seq(8.5, 12.5, 1), labels=RM_noGH$SurN[RM_noGH$Geo=="east"], cex=.6)
+text(y=-3, x=seq(14.5, 23.5, 1), labels=RM_noGH$SurN[RM_noGH$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=20, "error bars are parametric BS of second model only", cex=.6)
+
+legend("topright", legend=c( "West", "West, vernalized", "East", "NonNative"), text.col=VernGeo_colors[c(3,4,1,2)], bty="n", cex=.8, fill=VernGeo_colors[c(3,4,1,2)], density=c(NA, 30, NA, NA) ) 
+
+arrows(c(seq(.5, 6.5, 1), seq(8.5, 12.5, 1), seq(14.5, 23.5, 1)), RM_noGH$M14pvL, c(seq(.5, 6.5, 1), seq(8.5, 12.5, 1), seq(14.5, 23.5, 1)), RM_noGH$M14pvH,length=.05, angle=90, code=3 )
+
+```
+
+```{r PlotStrAvgs, echo=FALSE, fig.height=8}
+par(mfrow=c(2,1), las=2)
+barplot(height=RM_Sum_All$meanGTF, names.arg=RM_Sum_All$Pop, cex.names=.75, col=as.character(RM_Sum_All$GEGeoColor), density=RM_Sum_All$VernLevel, space=c(rep(0, length(RM_Sum_All$Geo[RM_Sum_All$Geo=="west"])), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="east"])-1)), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Unweighted Pop Mean\nOriginal response variable" ) 
+
+#Plot N below bars
+
+text(y=-3, x=seq(.5, 8.5, 1), labels=RM_Sum_All$GTFN[RM_Sum_All$Geo=="west"], cex=.6)
+text(y=-3, x=seq(10.5, 15.5, by=1), labels=RM_Sum_All$GTFN[RM_Sum_All$Geo=="east"], cex=.6)
+text(y=-3, x=seq(17.5, 30.5, by=1), labels=RM_Sum_All$GTFN[RM_Sum_All$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=25, "error bars are 1.96 * SD", cex=.6)
+#Plot SDs
+
+arrows(c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), (RM_Sum_All$meanGTF - RM_Sum_All$CIsdGTF), c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), (RM_Sum_All$meanGTF + RM_Sum_All$CIsdGTF),length=.05, angle=90, code=3 )
+
+legend("topright", legend=c(  "West, Field", "West, Greenhouse", "West, Greenhouse, Vernalization", "East, Field", "East, Greenhouse", "NonNative, Field", "NonNative, Greenhouse"), text.col=GEGeo_colors[c(5,6,6,1,2,3,4)], bty="n", cex=.5,  fill=GEGeo_colors[c(5,6,6,1,2,3,4)], density=c(NA, NA, 30, NA, NA, NA, NA) ) 
+
+barplot(height=RM_Sum_All$meanSGTF, names.arg=RM_Sum_All$Pop, cex.names=.75, col=as.character(RM_Sum_All$GEGeoColor), density=RM_Sum_All$VernLevel, space=c(rep(0, length(RM_Sum_All$Geo[RM_Sum_All$Geo=="west"])), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="east"])-1)), 1, rep(0,(length(RM_Sum_All$Geo[RM_Sum_All$Geo=="nonNative"])-1))), ylim=c(-6, 170),  main="Unweighted Pop Mean\nSurvivor response variable" ) 
+
+text(y=-3, x=seq(.5, 8.5, 1), labels=RM_Sum_All$SurN[RM_Sum_All$Geo=="west"], cex=.6)
+text(y=-3, x=seq(10.5, 15.5, by=1), labels=RM_Sum_All$SurN[RM_Sum_All$Geo=="east"], cex=.6)
+text(y=-3, x=seq(17.5, 30.5, by=1), labels=RM_Sum_All$SurN[RM_Sum_All$Geo=="nonNative"], cex=.6)
+text(y=-3, x=-.7, labels="N=", cex=.8)
+text(y=100, x=25, "error bars are 1.96 * SD", cex=.6)
+
+legend("topright", legend=c(  "West, Field", "West, Greenhouse", "West, Greenhouse, Vernalization", "East, Field", "East, Greenhouse", "NonNative, Field", "NonNative, Greenhouse"),text.col=GEGeo_colors[c(5,6,6,1,2,3,4)], bty="n", cex=.5,  fill=GEGeo_colors[c(5,6,6,1,2,3,4)], density=c(NA, NA, 30, NA, NA, NA, NA) ) 
+
+arrows(c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), (RM_Sum_All$meanSGTF - RM_Sum_All$CIsdSGTF), c(seq(.5, 8.5, 1), seq(10.5, 15.5, 1), seq(17.5, 30.5, 1)), (RM_Sum_All$meanSGTF + RM_Sum_All$CIsdSGTF),length=.05, angle=90, code=3 )
+
+```
+

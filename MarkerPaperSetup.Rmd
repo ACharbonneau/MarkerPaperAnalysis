@@ -30,6 +30,7 @@ Summer2010dataSummary.csv
 ```{r Settings, echo=FALSE, message=FALSE}
 rm( list=ls())
 require(plyr)
+require(RColorBrewer)
 ```
 
 ```{r ReadIN, echo=FALSE}
@@ -51,6 +52,8 @@ qst_2004 <- read.csv("2004 QstOffspring.csv", na.strings=".")
 spring2013 <- read.csv("2013plantsSpring.csv", sep=",", na.strings="")
 
 sum2010 <- read.csv("Summer2010dataSummary.csv", na.strings=".")
+
+markers <- c("ADOL","AFFR","AROL","AUFI","BINY","CBBG","CBES","COAU","COOL","DAJO","DEES","ESNK","GHIL","GMIL","HCES","HMES","HZIL","IMES","MABG","MAES","MYJO","NCDE","NELO","NZIL","PBFR","RA173","RA215","RA219","RA226","RA264","RA265","RA399","RA402","RA432","RA444","RA447","RA475","RA494","RA503","RA761","RA787","RA835","RA837","RA838","RA840","RABG","RACA","REIL","SAES","SPEU","TOBG","TYIL","WEAU","WMBG","ZYIL")
 ```
 ####Fix dates for each dataset so they are all the same format, as in:
 ```{r Dates1}
@@ -97,7 +100,8 @@ plants2012$Bolted_Date <- as.POSIXct( strptime(plants2012$Bolted_Date, format="%
 plants2012$Flowering_Date <- as.POSIXct( strptime(plants2012$Flowering_Date, format="%m/%d/%y"))
 plants2012$Date_Blossom_Collected <- as.POSIXct( strptime(plants2012$Date_Blossom_Collected, format="%m/%d/%y"))
 plants2012$second_bolt <- as.POSIXct( strptime(plants2012$second_bolt, format="%m/%d/%y"))
-plants2012 <- droplevels(plants2012[plants2012$subpop != "unknown" & plants2012$subpop != "cross" & plants2012$subpop != "confusus", ])
+plants2012$SpringAliveDate <- as.POSIXct( strptime(plants2012$SpringAliveDate, format="%m/%d/%y"))
+plants2012 <- droplevels(plants2012[plants2012$subpop != "unknown" & plants2012$subpop != "cross", ])
 plants2012$PTF <- plants2012$Flowering_Date - plants2012$Planting_Date
 plants2012$Survive_winter <- ifelse(plants2012$Survive_winter==0, "No", "Yes")
 
@@ -188,9 +192,11 @@ sum2010$X2ndRosettePhoto <- as.POSIXct( strptime( sum2010$X2ndRosettePhoto, form
 
 **DaysVernNoNA** is whether an individual was vernalized (x = 0 = no), and for how many days (x > 0 = # days)
 
+**SurviveGTF** is usually the the number of days from germination to flowering, or bolting the following spring. Otherwise, if plant survived to the final fall observation, it is the number of days from germination to the final fall observation plus one. Or, if the plant survived until the following spring, but didn't flower by the final spring observation, it is the number of days from germination to the final spring observation plus one.
+
 As in:
 ```{r Subsetting1}
-columnnames <- c("Experiment", "ID", "GrowthEnvironment", "Pop", "PTF", "DTB", "GTF", "Year", "FlowDate", "PlantDate", "GermDate", "HeightFFcm", "Vernalized", "DaysVern", "TimesVern")
+columnnames <- c("Experiment", "ID", "GrowthEnvironment", "Pop", "PTF", "DTB", "GTF", "Year", "FlowDate", "PlantDate", "GermDate", "HeightFFcm", "Vernalized", "DaysVern", "TimesVern", "SurviveGTF")
 
 # subset cult_2013
 cult_2013sub <- data.frame(rep("Cult2013", length(cult_2013$Cultivar)),  	#Experiment
@@ -207,7 +213,9 @@ cult_2013sub <- data.frame(rep("Cult2013", length(cult_2013$Cultivar)),  	#Exper
                          cult_2013$X1stFlwrHt_cm,		#HeightFFcm
                          rep("No", length(cult_2013$Cultivar)),		#Vernalized
                          rep(NA, length(cult_2013$Cultivar)),		#DaysVern
-                         rep(NA, length(cult_2013$Cultivar)))		#TimesVern
+                         rep(NA, length(cult_2013$Cultivar)),		#TimesVern
+                         ifelse(is.na(cult_2013$FlwrTime) == T, (as.POSIXct("12/2/13", format="%m/%d/%y") - cult_2013$Germ) + 1, 
+                                round(cult_2013$FlowerDate - cult_2013$Germ)))   #SurviveGTF
 ```
 #####Vernalization Data
 For greenhouse studies, the columns **Vernalized**, **DaysVern** and **TimesVern** were treatment variables and were taken directly from the data sheets. For the three field seasons, plants did experiance vernalization, but as winter rather than as a dedicated treatment. For these studies, I based their vernalization on the maximum daily temperature of the city they were grown in. Variables for these three studies were determined in the following way:
@@ -262,7 +270,8 @@ gh2006sub <- data.frame(rep("gh2006", length(gh_2006$Pop)),  	#Experiment
                          (gh_2006$Hgt1stFlwr_mm / 100),		#HeightFFcm
                          ifelse(gh_2006$DaysVernal > 0, "Yes", "No"),		#Vernalized
                          gh_2006$DaysVernal,		#DaysVern
-                         gh_2006$NumVernaliz)		#TimesVern
+                         gh_2006$NumVernaliz,		#TimesVern
+                         rep(NA, length(gh_2006$Pop))) #SurviveGTF
                          
 IS_2013sub <- data.frame(rep("IS2013", length(IS_2013$Population)),		#Experiment
                          paste(IS_2013$Population, round(IS_2013$Pot), sep=""),		#ID
@@ -278,7 +287,8 @@ IS_2013sub <- data.frame(rep("IS2013", length(IS_2013$Population)),		#Experiment
                          (IS_2013$X1stFlwrHt_mm / 100),		#HeightFFcm
                          rep("No", length(IS_2013$Population)),		#Vernalized
                          rep(NA, length(IS_2013$Population)),		#DaysVern
-                         rep(NA, length(IS_2013$Population)))		#TimesVern
+                         rep(NA, length(IS_2013$Population)),		#TimesVern
+                         IS_2013$GTF)  #SurviveGTF
                                                   
 lalesub <- data.frame(rep("Lale05", length(lale2005$population)),		#Experiment
                       paste(lale2005$family, lale2005$sibling, sep=""),		#ID
@@ -294,7 +304,11 @@ lalesub <- data.frame(rep("Lale05", length(lale2005$population)),		#Experiment
                       (lale2005$firstFlwrHt_mm / 100),		#HeightFFcm
                       ifelse(lale2005$First_FlowerDate > as.POSIXct("12/31/05", format="%m/%d/%y"), "Yes", "No"),		#Vernalized
                       ifelse(lale2005$First_FlowerDate > as.POSIXct("12/31/05", format="%m/%d/%y"), 150, NA),  #Nov 16- Apr 15		#DaysVern
-                      ifelse(lale2005$First_FlowerDate > as.POSIXct("12/31/05", format="%m/%d/%y"), 1, NA))		#TimesVern
+                      ifelse(lale2005$First_FlowerDate > as.POSIXct("12/31/05", format="%m/%d/%y"), 1, NA),		#TimesVern
+                      ifelse(is.na(lale2005$DaysGermToFlwr) == T & is.na(lale2005$OvuleDate) == F, NA,    
+                          ifelse(is.na(lale2005$DaysGermToFlwr) == T & lale2005$Mortality_Date > as.POSIXct("11/29/05", format="%m/%d/%y"), 
+                                 (lale2005$Mortality_Date + 86400) - lale2005$Germination_Date, 
+                                  lale2005$DaysGermToFlwr))) #SurviveGTF
 	
 p2012sub <- data.frame(rep("field2012", length(plants2012$Code)),		#Experiment
                        paste(plants2012$Row, plants2012$Column, sep=""),		#ID
@@ -310,8 +324,16 @@ p2012sub <- data.frame(rep("field2012", length(plants2012$Code)),		#Experiment
                        plants2012$Height_1st_Flower_cm,		#HeightFFcm
                        ifelse(plants2012$Flowering_Date > as.POSIXct("12/31/12", format="%m/%d/%y"), "Yes", "No"),		#Vernalized
                        ifelse(plants2012$Flowering_Date > as.POSIXct("12/31/12", format="%m/%d/%y"), 168, NA), #Oct 29 - Apr 15		#DaysVern
-                       ifelse(plants2012$Survive_winter=="No", NA, 1))		#TimesVern
-	
+                       ifelse(plants2012$Survive_winter=="No", NA, 1),		#TimesVern
+                       
+                       ifelse(is.na(plants2012$Died_By) == F & plants2012$Died_before_flowering == 1, NA, #Did you die in summer?, Yes = NA
+                            ifelse(is.na(plants2012$Days_Germ_to_Flow) == F, plants2012$Days_Germ_to_Flow, #Did you flower by fall? Yes = GTF
+                                  ifelse(is.na(plants2012$SpringAliveDate) == T, (as.POSIXct("9/12/12", format="%m/%d/%y") - plants2012$Germ_Date) + 1, #Did you die of winter Yes= FallDate
+                                        #ifelse(is.na(plants2012$Bolted_Date) == F, (plants2012$Bolted_Date - plants2012$Germ_Date) + 1, #Did you bolt in spring? Yes = BoltDate
+                            (as.POSIXct("5/28/13", format="%m/%d/%y") - plants2012$Germ_Date) + 1 ))))#) #Lived but didn't bolt by spring Yes = SpringDate
+ #SurviveGTF
+
+
 qst2003sub <- data.frame(rep("qst2003", length(qst_2003$Pop)),		#Experiment
                          as.factor(qst_2003$UniqueID),		#ID
                          rep("greenhouse", length(qst_2003$Pop)),		#GrowthEnvironment
@@ -326,7 +348,8 @@ qst2003sub <- data.frame(rep("qst2003", length(qst_2003$Pop)),		#Experiment
                          qst_2003$X1stFlwrHgt_cm,		#HeightFFcm
                          ifelse(qst_2003$NumVernalz > 0, "Yes", "No"),		#Vernalized
                          qst_2003$DaysVernalized,		#DaysVern
-                         qst_2003$NumVernalz)		#TimesVern
+                         qst_2003$NumVernalz,		#TimesVern
+                         qst_2003$GermToFlwr)   #SurviveGTF
 
 qst2004sub <- data.frame(rep("qst2004", length(qst_2004$Pop)),		#Experiment
                          as.factor(qst_2004$ID),		#ID
@@ -342,7 +365,8 @@ qst2004sub <- data.frame(rep("qst2004", length(qst_2004$Pop)),		#Experiment
                          qst_2004$X1stFlwrHgt_cm,		#HeightFFcm
                          ifelse(qst_2004$NumVernal > 0, "Yes", "No"),		#Vernalized
                          qst_2004$DaysVernal,		#DaysVern
-                         qst_2004$NumVernal)		#TimesVern
+                         qst_2004$NumVernal,		#TimesVern
+                         qst_2004$germ2flwr)   #SurviveGTF
 
 
 s2013sub <- data.frame(rep("field2013", length(spring2013$Name)),		#Experiment
@@ -359,8 +383,10 @@ s2013sub <- data.frame(rep("field2013", length(spring2013$Name)),		#Experiment
                        spring2013$Height_1st_Flower_cm,		#HeightFFcm
                        rep("No", length(spring2013$Name)), # Oct 24 - Apr 6		#Vernalized
                        rep(NA, length(spring2013$Name)),		#DaysVern
-                       rep(NA, length(spring2013$Name)))		#TimesVern
-                        
+                       rep(NA, length(spring2013$Name)),		#TimesVern
+                       ifelse(is.na(spring2013$Died) == F & is.na(spring2013$Flower_Date) == T, NA,
+                            ifelse(is.na(spring2013$DTF) == F, spring2013$DTF,
+                                   round(as.POSIXct("11/14/13", format="%m/%d/%y") - spring2013$GD) + 1 ))) #SurviveGTF
 
 sum2010sub <- data.frame(rep("sum2010", length(sum2010$Pop)),		#Experiment
                          paste(sum2010$Pop, sum2010$Plant, sep=""),		#ID
@@ -376,7 +402,8 @@ sum2010sub <- data.frame(rep("sum2010", length(sum2010$Pop)),		#Experiment
                          rep(NA, length(sum2010$Pop)),		#HeightFFcm
                          ifelse(sum2010$DaysVernal > 0, "Yes", "No"),		#Vernalized
                          sum2010$DaysVernal,		#DaysVern
-                         sum2010$NumVernaliz)		#TimesVern
+                         sum2010$NumVernaliz,		#TimesVern
+                         round(sum2010$X1stflwr - sum2010$germDate)) #SurviveGTF
 ```
 I ran each subsetted dataset through a custom function that changed all named variables to factors, created several of the "Yes"/"No" columns, rounded numbers in calculations, and assigned **Seedstock** and **GermLocation** data before combining all the datasets into a single dataframe.
 
@@ -392,6 +419,7 @@ ParseData <- function( mydata ) {
   mydata$PTF <- round(mydata$PTF)
   mydata$DTB <- round(mydata$DTB)
   mydata$GTF <- round(mydata$GTF)
+  mydata$SurviveGTF <- round(mydata$SurviveGTF)
   mydata$Seedstock <- ifelse(  (mydata$Experiment == "IS2013" & mydata$Pop == "MAES") | 
                                        (mydata$Experiment == "Lale05" & mydata$Pop != "PBFR") |
                                        (mydata$Experiment == "qst2004"), "Greenhouse",      
@@ -417,22 +445,22 @@ CombinedDataSet <- data.frame(rbind(cult_2013sub, gh2006sub, IS_2013sub, lalesub
 
 To create the **Subspecies**, **Species**, **Geography**, **Taxonomy**, **Habitat**, **SpecificOrigin** and **RegionOrigin** columns, I made a series of assignment lists based on population names, as in:
 ```{r Assign1}
-SubSpeciesList <- c(ADOL="sativus", AROL="sativus", CBBG="sativus", COOL="sativus", DAJO="sativus", ESNK="sativus", MABG="sativus", MYJO="sativus", NELO="sativus", OIBG="sativus", RABG="sativus", RACA="sativus", SPEU="sativus", TOBG="sativus", WMBG="sativus", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="landra", SAES="maritimus", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="maritimus", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="sativus", FGBC="sativus", FRSI="sativus", LBBC="sativus", MBBC="sativus", NTJO="sativus", PABS="sativus", RABS="sativus", RBBC="sativus", SPNK="sativus", NZIL="confusus", TYIL="raphanistrum")
+SubSpeciesList <- c(ADOL="sativus", AROL="sativus", CBBG="sativus", COOL="sativus", DAJO="sativus", ESNK="sativus", MABG="sativus", MYJO="sativus", NELO="sativus", OIBG="sativus", RABG="sativus", RACA="sativus", SPEU="sativus", TOBG="sativus", WMBG="sativus", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="landra", SAES="maritimus", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="maritimus", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum",  NZIL="confusus", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="sativus", FGBC="sativus", FRSI="sativus", LBBC="sativus", MBBC="sativus", NTJO="sativus", PABS="sativus", RABS="sativus", RBBC="sativus", SPNK="sativus", TYIL="raphanistrum")
 ```
 
 ```{r Assign2, echo=FALSE}
 
-SpeciesList <- c(ADOL="sativus", AROL="sativus", CBBG="sativus", COOL="sativus", DAJO="sativus", ESNK="sativus", MABG="sativus", MYJO="sativus", NELO="sativus", OIBG="sativus", RABG="sativus", RACA="sativus", SPEU="sativus", TOBG="sativus", WMBG="sativus", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="raphanistrum", SAES="raphanistrum", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="raphanistrum", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="sativus", FGBC="sativus", FRSI="sativus", LBBC="sativus", MBBC="sativus", NTJO="sativus", PABS="sativus", RABS="sativus", RBBC="sativus", SPNK="sativus", NZIL="confusus", TYIL="raphanistrum")
+SpeciesList <- c(ADOL="sativus", AROL="sativus", CBBG="sativus", COOL="sativus", DAJO="sativus", ESNK="sativus", MABG="sativus", MYJO="sativus", NELO="sativus", OIBG="sativus", RABG="sativus", RACA="sativus", SPEU="sativus", TOBG="sativus", WMBG="sativus", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="raphanistrum", SAES="raphanistrum", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="raphanistrum", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", NZIL="confusus", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="sativus", FGBC="sativus", FRSI="sativus", LBBC="sativus", MBBC="sativus", NTJO="sativus", PABS="sativus", RABS="sativus", RBBC="sativus", SPNK="sativus", TYIL="raphanistrum")
 
-GeographyList <- c(ADOL="NA", AROL="NA", CBBG="NA", COOL="NA", DAJO="NA", ESNK="NA", MABG="NA", MYJO="NA", NELO="NA", OIBG="NA", RABG="NA", RACA="NA", SPEU="NA", TOBG="NA", WMBG="NA", AFFR="west", BBCA="nonNative", BINY="nonNative", GSCA="nonNative", MAES="west", PBFR="west", SAES="west", DEES="west", GHIL="east", HCES="west", HMES="west", HZIL="east", IMES="west", ZYIL="east", AUFI="nonNative", COAU="nonNative", KAMI="nonNative", AL="nonNative", CBES="west", GMIL="rostratus", M3AU="nonNative", N3="nonNative", PG6="nonNative", REIL="east", MAFI="nonNative", NAAU="nonNative", WEAU="nonNative", CGBC="NA", FGBC="NA", FRSI="NA", LBBC="NA", MBBC="NA", NTJO="NA", PABS="NA", RABS="NA", RBBC="NA", SPNK="NA", NZIL="confusus", TYIL="east")
+GeographyList <- c(ADOL="NA", AROL="NA", CBBG="NA", COOL="NA", DAJO="NA", ESNK="NA", MABG="NA", MYJO="NA", NELO="NA", OIBG="NA", RABG="NA", RACA="NA", SPEU="NA", TOBG="NA", WMBG="NA", AFFR="west", BBCA="nonNative", BINY="nonNative", GSCA="nonNative", MAES="west", PBFR="west", SAES="west", DEES="west", GHIL="east", HCES="west", HMES="west", HZIL="east", IMES="west", ZYIL="east", AUFI="nonNative", COAU="nonNative", KAMI="nonNative", AL="nonNative", CBES="west", GMIL="rostratus", M3AU="nonNative", N3="nonNative", NZIL="confusus", PG6="nonNative", REIL="east", MAFI="nonNative", NAAU="nonNative", WEAU="nonNative", CGBC="NA", FGBC="NA", FRSI="NA", LBBC="NA", MBBC="NA", NTJO="NA", PABS="NA", RABS="NA", RBBC="NA", SPNK="NA", TYIL="east")
 
-TaxonomyList <- c(ADOL="oleifera", AROL="oleifera", CBBG="european", COOL="oleifera", DAJO="european", ESNK="european", MABG="caudatus", MYJO="daikon", NELO="daikon", OIBG="oleifera", RABG="caudatus", RACA="caudatus", SPEU="european", TOBG="daikon", WMBG="daikon", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="landra", SAES="maritimus", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="maritimus", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="daikon", FGBC="daikon", FRSI="european", LBBC="european", MBBC="european", NTJO="european", PABS="european", RABS="european", RBBC="european", SPNK="european", NZIL="confusus", TYIL="raphanistrum")
+TaxonomyList <- c(ADOL="oleifera", AROL="oleifera", CBBG="european", COOL="oleifera", DAJO="european", ESNK="european", MABG="caudatus", MYJO="daikon", NELO="daikon", OIBG="oleifera", RABG="caudatus", RACA="caudatus", SPEU="european", TOBG="daikon", WMBG="daikon", AFFR="raphanistrum", BBCA="CAHybrid", BINY="raphanistrum", GSCA="CAHybrid", MAES="raphanistrum", PBFR="landra", SAES="maritimus", DEES="raphanistrum", GHIL="raphanistrum", HCES="raphanistrum", HMES="raphanistrum", HZIL="raphanistrum", IMES="raphanistrum", ZYIL="raphanistrum", AUFI="raphanistrum", COAU="raphanistrum", KAMI="raphanistrum", AL="raphanistrum", CBES="maritimus", GMIL="rostratus", M3AU="raphanistrum", N3="raphanistrum", NZIL="confusus", PG6="raphanistrum", REIL="raphanistrum", MAFI="raphanistrum", NAAU="raphanistrum", WEAU="raphanistrum", CGBC="daikon", FGBC="daikon", FRSI="european", LBBC="european", MBBC="european", NTJO="european", PABS="european", RABS="european", RBBC="european", SPNK="european", TYIL="raphanistrum")
 
-HabitatList <- c(ADOL="cultivar", AROL="cultivar", CBBG="cultivar", COOL="cultivar", DAJO="cultivar", ESNK="cultivar", MABG="cultivar", MYJO="cultivar", NELO="cultivar", OIBG="cultivar", RABG="cultivar", RACA="cultivar", SPEU="cultivar", TOBG="cultivar", WMBG="cultivar", AFFR="agricultural", BBCA="natural", BINY="agricultural", GSCA="natural", MAES="disturbed", PBFR="natural", SAES="natural", DEES="natural", GHIL="disturbed", HCES="disturbed", HMES="disturbed", HZIL="disturbed", IMES="disturbed", ZYIL="disturbed", AUFI="agricultural", COAU="agricultural", KAMI="agricultural", AL="agricultural", CBES="natural", GMIL="natural", M3AU="agricultural", N3="agricultural", PG6="agricultural", REIL="disturbed", MAFI="disturbed", NAAU="agricultural", WEAU="agricultural", CGBC="cultivar", FGBC="cultivar", FRSI="cultivar", LBBC="cultivar", MBBC="cultivar", NTJO="cultivar", PABS="cultivar", RABS="cultivar", RBBC="cultivar", SPNK="cultivar", NZIL="natural", TYIL="disturbed")
+HabitatList <- c(ADOL="cultivar", AROL="cultivar", CBBG="cultivar", COOL="cultivar", DAJO="cultivar", ESNK="cultivar", MABG="cultivar", MYJO="cultivar", NELO="cultivar", OIBG="cultivar", RABG="cultivar", RACA="cultivar", SPEU="cultivar", TOBG="cultivar", WMBG="cultivar", AFFR="agricultural", BBCA="natural", BINY="agricultural", GSCA="natural", MAES="disturbed", PBFR="natural", SAES="natural", DEES="natural", GHIL="disturbed", HCES="disturbed", HMES="disturbed", HZIL="disturbed", IMES="disturbed", ZYIL="disturbed", AUFI="agricultural", COAU="agricultural", KAMI="agricultural", AL="agricultural", CBES="natural", GMIL="natural", M3AU="agricultural", N3="agricultural", NZIL="natural", PG6="agricultural", REIL="disturbed", MAFI="disturbed", NAAU="agricultural", WEAU="agricultural", CGBC="cultivar", FGBC="cultivar", FRSI="cultivar", LBBC="cultivar", MBBC="cultivar", NTJO="cultivar", PABS="cultivar", RABS="cultivar", RBBC="cultivar", SPNK="cultivar", TYIL="disturbed")
 
-SpecificOriginList <- c(ADOL="MSU", AROL="MSU", CBBG="BountifulGardens", COOL="MSU", DAJO="JohnScheepers", ESNK="NKLawn", MABG="BountifulGardens", MYJO="JohnScheepers", NELO="JohnScheepers", OIBG="BountifulGardens", RABG="BountifulGardens", RACA="California", SPEU="unknown", TOBG="BountifulGardens", WMBG="BountifulGardens", AFFR="France", BBCA="California", BINY="NewYork", GSCA="California", MAES="Spain", PBFR="France", SAES="Spain", DEES="Spain", GHIL="Israel", HCES="Spain", HMES="Spain", HZIL="Israel", IMES="Spain", ZYIL="Israel", AUFI="Finland", COAU="Australia", KAMI="Michigan", AL="Australia", CBES="Spain", GMIL="Israel", M3AU="Australia", N3="Australia", PG6="Australia", REIL="Israel", MAFI="Finland", NAAU="Australia", WEAU="Australia", CGBC="BakersCreek", FGBC="BakersCreek", FRSI="SeedsItaly", LBBC="BakersCreek", MBBC="BakersCreek", NTJO="JohnScheepers", PABS="Burpees", RABS="Burpees", RBBC="BakersCreek", SPNK="NKLawn", NZIL="Israel", TYIL="Israel")
+SpecificOriginList <- c(ADOL="MSU", AROL="MSU", CBBG="BountifulGardens", COOL="MSU", DAJO="JohnScheepers", ESNK="NKLawn", MABG="BountifulGardens", MYJO="JohnScheepers", NELO="JohnScheepers", OIBG="BountifulGardens", RABG="BountifulGardens", RACA="California", SPEU="unknown", TOBG="BountifulGardens", WMBG="BountifulGardens", AFFR="France", BBCA="California", BINY="NewYork", GSCA="California", MAES="Spain", PBFR="France", SAES="Spain", DEES="Spain", GHIL="Israel", HCES="Spain", HMES="Spain", HZIL="Israel", IMES="Spain", ZYIL="Israel", AUFI="Finland", COAU="Australia", KAMI="Michigan", AL="Australia", CBES="Spain", GMIL="Israel", M3AU="Australia", N3="Australia", NZIL="Israel", PG6="Australia", REIL="Israel", MAFI="Finland", NAAU="Australia", WEAU="Australia", CGBC="BakersCreek", FGBC="BakersCreek", FRSI="SeedsItaly", LBBC="BakersCreek", MBBC="BakersCreek", NTJO="JohnScheepers", PABS="Burpees", RABS="Burpees", RBBC="BakersCreek", SPNK="NKLawn", TYIL="Israel")
 
-RegionOriginList <- c(ADOL="oleifera", AROL="oleifera", CBBG="european", COOL="oleifera", DAJO="european", ESNK="european", MABG="caudatus", MYJO="daikon", NELO="daikon", OIBG="oleifera", RABG="caudatus", RACA="caudatus", SPEU="european", TOBG="daikon", WMBG="daikon", AFFR="France", BBCA="California", BINY="NewYork", GSCA="California", MAES="Spain", PBFR="France", SAES="Spain", DEES="Spain", GHIL="Israel", HCES="Spain", HMES="Spain", HZIL="Israel", IMES="Spain", ZYIL="Israel", AUFI="Finland", COAU="Australia", KAMI="Michigan", AL="Australia", CBES="Spain", GMIL="Israel", M3AU="Australia", N3="Australia", PG6="Australia", REIL="Israel", MAFI="Finland", NAAU="Australia", WEAU="Australia", CGBC="daikon", FGBC="daikon", FRSI="european", LBBC="european", MBBC="european", NTJO="european", PABS="european", RABS="european", RBBC="european", SPNK="european", NZIL="Israel", TYIL="Israel")
+RegionOriginList <- c(ADOL="oleifera", AROL="oleifera", CBBG="european", COOL="oleifera", DAJO="european", ESNK="european", MABG="caudatus", MYJO="daikon", NELO="daikon", OIBG="oleifera", RABG="caudatus", RACA="caudatus", SPEU="european", TOBG="daikon", WMBG="daikon", AFFR="France", BBCA="California", BINY="NewYork", GSCA="California", MAES="Spain", PBFR="France", SAES="Spain", DEES="Spain", GHIL="Israel", HCES="Spain", HMES="Spain", HZIL="Israel", IMES="Spain", ZYIL="Israel", AUFI="Finland", COAU="Australia", KAMI="Michigan", AL="Australia", CBES="Spain", GMIL="Israel", M3AU="Australia", N3="Australia", NZIL="Israel", PG6="Australia", REIL="Israel", MAFI="Finland", NAAU="Australia", WEAU="Australia", CGBC="daikon", FGBC="daikon", FRSI="european", LBBC="european", MBBC="european", NTJO="european", PABS="european", RABS="european", RBBC="european", SPNK="european", TYIL="Israel")
 ```
 
 ```{r Assign3, echo=FALSE}
@@ -458,9 +486,10 @@ CombinedDataSet$DOYGP <- ifelse(is.na(CombinedDataSet$DOYG), CombinedDataSet$DOY
 CombinedDataSet$DaysVernNoNA <- CombinedDataSet$DaysVern
 CombinedDataSet$DaysVernNoNA[is.na(CombinedDataSet$DaysVernNoNA)] <- 0
 CombinedDataSet$FlowDate <- strftime(CombinedDataSet$FlowDate, format="%Y-%m-%d" )
+CombinedDataSet$SurviveGTF <- round(CombinedDataSet$SurviveGTF)
+CombinedDataSet$PTG <- round(CombinedDataSet$GermDate - CombinedDataSet$PlantDate)
 
-
-
+CombinedDataSet <- droplevels(CombinedDataSet[CombinedDataSet$Pop != "N3",])
 ```
 
 Write to CSV file:
@@ -474,6 +503,16 @@ str(CombinedDataSet)
 
 attach(CombinedDataSet)
 ```
+
+```{r Colors, echo=FALSE}
+
+col_pal1 = brewer.pal(12, "Set3")
+col_pal2 = brewer.pal(8, "Dark2")
+col_pal3 = brewer.pal(12, "Paired")
+col_pal = c(col_pal1, col_pal2, col_pal3)
+
+```
+
 Levels of each factor:
 ```{r Levels}
 length(levels(Pop))
@@ -486,6 +525,23 @@ levels(SpecificOrigin)
 levels(RegionOrigin)
 
 ```
+
+```{r}
+par(mfrow=c(1,1))
+SGTF <- hist(as.numeric(SurviveGTF), breaks=50, plot = F)
+
+hist(as.numeric(SurviveGTF), breaks=SGTF$breaks)
+hist(as.numeric(GTF), breaks=SGTF$breaks, add=T)
+
+#germination latency
+plot(PTG, pch=16, col=col_pal3[Experiment])
+
+
+plot(as.factor(FlowDate[Experiment == "field2013"]))
+
+
+```
+
 
 ```{r Tables}
 table(Pop)
@@ -505,5 +561,9 @@ Barplot showing number of individuals per population
 ```{r Plots2, echo=FALSE}
 par(las=2, cex.axis=.6)
 plot(Pop)
+```
+
+```{r}
+
 ```
 
